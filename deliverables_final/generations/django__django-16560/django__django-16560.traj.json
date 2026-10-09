@@ -1,0 +1,1941 @@
+{
+  "info": {
+    "exit_status": "Submitted",
+    "submission": "diff --git a/django/db/models/constraints.py b/django/db/models/constraints.py\nindex 075ecee1be..f05bc74554 100644\n--- a/django/db/models/constraints.py\n+++ b/django/db/models/constraints.py\n@@ -19,10 +19,12 @@ __all__ = [\"BaseConstraint\", \"CheckConstraint\", \"Deferrable\", \"UniqueConstraint\"\n class BaseConstraint:\n     default_violation_error_message = _(\"Constraint \u201c%(name)s\u201d is violated.\")\n     violation_error_message = None\n+    default_violation_error_code = \"unique\"\n+    violation_error_code = None\n \n     # RemovedInDjango60Warning: When the deprecation ends, replace with:\n     # def __init__(self, *, name, violation_error_message=None):\n-    def __init__(self, *args, name=None, violation_error_message=None):\n+    def __init__(self, *args, name=None, violation_error_message=None, violation_error_code=None):\n         # RemovedInDjango60Warning.\n         if name is None and not args:\n             raise TypeError(\n@@ -34,6 +36,10 @@ class BaseConstraint:\n             self.violation_error_message = violation_error_message\n         else:\n             self.violation_error_message = self.default_violation_error_message\n+        if violation_error_code is not None:\n+            self.violation_error_code = violation_error_code\n+        else:\n+            self.violation_error_code = self.default_violation_error_code\n         # RemovedInDjango60Warning.\n         if args:\n             warnings.warn(\n@@ -74,6 +80,11 @@ class BaseConstraint:\n             and self.violation_error_message != self.default_violation_error_message\n         ):\n             kwargs[\"violation_error_message\"] = self.violation_error_message\n+        if (\n+            self.violation_error_code is not None\n+            and self.violation_error_code != self.default_violation_error_code\n+        ):\n+            kwargs[\"violation_error_code\"] = self.violation_error_code\n         return (path, (), kwargs)\n \n     def clone(self):\n@@ -82,13 +93,17 @@ class BaseConstraint:\n \n \n class CheckConstraint(BaseConstraint):\n-    def __init__(self, *, check, name, violation_error_message=None):\n+    def __init__(self, *, check, name, violation_error_message=None, violation_error_code=None):\n         self.check = check\n         if not getattr(check, \"conditional\", False):\n             raise TypeError(\n                 \"CheckConstraint.check must be a Q instance or boolean expression.\"\n             )\n-        super().__init__(name=name, violation_error_message=violation_error_message)\n+        super().__init__(\n+            name=name,\n+            violation_error_message=violation_error_message,\n+            violation_error_code=violation_error_code,\n+        )\n \n     def _get_check_sql(self, model, schema_editor):\n         query = Query(model=model, alias_cols=False)\n@@ -112,7 +127,9 @@ class CheckConstraint(BaseConstraint):\n         against = instance._get_field_value_map(meta=model._meta, exclude=exclude)\n         try:\n             if not Q(self.check).check(against, using=using):\n-                raise ValidationError(self.get_violation_error_message())\n+                raise ValidationError(\n+                    self.get_violation_error_message(), code=self.violation_error_code\n+                )\n         except FieldError:\n             pass\n \n@@ -135,6 +152,7 @@ class CheckConstraint(BaseConstraint):\n                 self.name == other.name\n                 and self.check == other.check\n                 and self.violation_error_message == other.violation_error_message\n+                and self.violation_error_code == other.violation_error_code\n             )\n         return super().__eq__(other)\n \n@@ -164,6 +182,7 @@ class UniqueConstraint(BaseConstraint):\n         include=None,\n         opclasses=(),\n         violation_error_message=None,\n+        violation_error_code=None,\n     ):\n         if not name:\n             raise ValueError(\"A unique constraint must be named.\")\n@@ -204,6 +223,11 @@ class UniqueConstraint(BaseConstraint):\n                 \"UniqueConstraint.fields and UniqueConstraint.opclasses must \"\n                 \"have the same number of elements.\"\n             )\n+        super().__init__(\n+            name=name,\n+            violation_error_message=violation_error_message,\n+            violation_error_code=violation_error_code,\n+        )\n         self.fields = tuple(fields)\n         self.condition = condition\n         self.deferrable = deferrable\n@@ -213,7 +237,11 @@ class UniqueConstraint(BaseConstraint):\n             F(expression) if isinstance(expression, str) else expression\n             for expression in expressions\n         )\n-        super().__init__(name=name, violation_error_message=violation_error_message)\n+        super().__init__(\n+            name=name,\n+            violation_error_message=violation_error_message,\n+            violation_error_code=violation_error_code,\n+        )\n \n     @property\n     def contains_expressions(self):\n@@ -308,6 +336,12 @@ class UniqueConstraint(BaseConstraint):\n                 or self.violation_error_message == self.default_violation_error_message\n                 else \" violation_error_message=%r\" % self.violation_error_message\n             ),\n+            (\n+                \"\"\n+                if self.violation_error_code is None\n+                or self.violation_error_code == self.default_violation_error_code\n+                else \" violation_error_code=%r\" % self.violation_error_code\n+            ),\n         )\n \n     def __eq__(self, other):\n@@ -321,6 +355,7 @@ class UniqueConstraint(BaseConstraint):\n                 and self.opclasses == other.opclasses\n                 and self.expressions == other.expressions\n                 and self.violation_error_message == other.violation_error_message\n+                and self.violation_error_code == other.violation_error_code\n             )\n         return super().__eq__(other)\n \n@@ -385,14 +420,17 @@ class UniqueConstraint(BaseConstraint):\n         if not self.condition:\n             if queryset.exists():\n                 if self.expressions:\n-                    raise ValidationError(self.get_violation_error_message())\n+                    raise ValidationError(\n+                    self.get_violation_error_message(), code=self.violation_error_code\n+                )\n                 # When fields are defined, use the unique_error_message() for\n                 # backward compatibility.\n                 for model, constraints in instance.get_constraints():\n                     for constraint in constraints:\n                         if constraint is self:\n                             raise ValidationError(\n-                                instance.unique_error_message(model, self.fields)\n+                                instance.unique_error_message(model, self.fields),\n+                                code=self.violation_error_code,\n                             )\n         else:\n             against = instance._get_field_value_map(meta=model._meta, exclude=exclude)\n@@ -400,6 +438,8 @@ class UniqueConstraint(BaseConstraint):\n                 if (self.condition & Exists(queryset.filter(self.condition))).check(\n                     against, using=using\n                 ):\n-                    raise ValidationError(self.get_violation_error_message())\n+                    raise ValidationError(\n+                    self.get_violation_error_message(), code=self.violation_error_code\n+                )\n             except FieldError:\n                 pass\n",
+    "model_stats": {
+      "instance_cost": 0.05310803,
+      "api_calls": 39
+    },
+    "mini_version": "1.11.1",
+    "config": {
+      "agent": {
+        "system_template": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE action block per step. You can choose one of:\n- A bash code block with ONE command (or commands connected with && or ||)\n- A tool block to call an available tool\n\nInclude a THOUGHT section before your action where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n{% if tool_specs %}\nAvailable tools (name, description, parameters):\n{% for t in tool_specs %}- {{t.name}}: {{t.description}} ({{t.parameters}})\n{% endfor %}\n{% endif %}\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n\nor\n\n```tool\n{\"name\": \"tool_name\", \"args\": {\"k\": \"v\"}}\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected.\n",
+        "instance_template": "<pr_description>\nConsider the following PR description:\n{{task}}\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE action to execute (bash block or tool block)\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. Exactly one action: either a bash code block with your command, or a tool block\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n\nor\n\n```tool\n{\"name\": \"tool_name\", \"args\": {\"k\": \"v\"}}\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE action (either a bash block or a tool block)\n- A bash action MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple action blocks, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nWhen you've completed your work (reading, editing, testing), and cannot make further progress\nissue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```\n\nThis command will submit your work.\nYou cannot continue working (reading, editing, testing) in any way on this task after submitting.\n</instructions>\n",
+        "timeout_template": "The last command <command>{{action['action']}}</command> timed out and has been killed.\nThe output of the command was:\n <output>\n{{output}}\n</output>\nPlease try another command and make sure to avoid those requiring interactive input.",
+        "format_error_template": "Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.\n\nPlease format your action in triple backticks as shown in <response_examples>.\n\n<response_examples>\nHere are some thoughts about why you want to perform the action.\n\n```bash\n<bash_action>\n```\n\nor\n\n```tool\n{\"name\": \"<tool_name>\", \"args\": { ... }}\n```\n</response_examples>\n\nIf you have completed your assignment, please consult the first message about how to\nsubmit your solution (you will not be able to continue working on this task after that).\n",
+        "action_observation_template": "<returncode>{{output.returncode}}</returncode>\n{% if output.output | length < 10000 -%}\n<output>\n{{ output.output -}}\n</output>\n{%- else -%}\n<warning>\nThe output of your last command was too long.\nPlease try a different command that produces less output.\nIf you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.\nIf you're using grep or find and it produced too much output, you can use a more selective search pattern.\nIf you really need to see something from the full command's output, you can redirect output to a file and then search in that file.\n</warning>\n{%- set elided_chars = output.output | length - 10000 -%}\n<output_head>\n{{ output.output[:5000] }}\n</output_head>\n<elided_chars>\n{{ elided_chars }} characters elided\n</elided_chars>\n<output_tail>\n{{ output.output[-5000:] }}\n</output_tail>\n{%- endif -%}\n",
+        "step_limit": 50,
+        "cost_limit": 3.0,
+        "enable_memory": false,
+        "memory_max_messages": 50,
+        "memory_dir": "",
+        "memory_session_id": "",
+        "memory_load_session": false
+      },
+      "model": {
+        "model_name": "gemini/gemini-2.5-flash",
+        "model_kwargs": {
+          "drop_params": true,
+          "temperature": 0.0
+        },
+        "litellm_model_registry": null
+      },
+      "environment": {
+        "image": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-16560:latest",
+        "cwd": "/testbed",
+        "env": {
+          "PAGER": "cat",
+          "MANPAGER": "cat",
+          "LESS": "-R",
+          "PIP_PROGRESS_BAR": "off",
+          "TQDM_DISABLE": "1"
+        },
+        "forward_env": [],
+        "timeout": 60,
+        "executable": "docker",
+        "run_args": [
+          "--rm"
+        ],
+        "container_timeout": "2h",
+        "pull_timeout": 900
+      },
+      "agent_type": "minisweagent.run.extra.swebench.ProgressTrackingAgent",
+      "model_type": "minisweagent.models.litellm_model.LitellmModel",
+      "environment_type": "minisweagent.environments.docker.DockerEnvironment"
+    }
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE action block per step. You can choose one of:\n- A bash code block with ONE command (or commands connected with && or ||)\n- A tool block to call an available tool\n\nInclude a THOUGHT section before your action where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n\nAvailable tools (name, description, parameters):\n- read_file: Read a UTF-8 text file. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to the file to read'}}, 'required': ['path'], 'additionalProperties': False})\n- write_file: Write content to a file inside the workspace. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to the file to write'}, 'content': {'type': 'string', 'description': 'Content to write to the file'}}, 'required': ['path', 'content'], 'additionalProperties': False})\n- refined_read_file: Read a text file with targeted line selection to reduce tokens. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to the file to read'}, 'selector': {'type': 'object', 'description': 'Line selection strategy (provide exactly one)', 'properties': {'lines': {'type': 'array', 'items': {'type': 'integer', 'minimum': 1}, 'description': 'Exact line numbers (1-indexed)'}, 'range': {'type': 'object', 'properties': {'start': {'type': 'integer', 'minimum': 1}, 'end': {'type': 'integer', 'minimum': 1}}, 'required': ['start', 'end'], 'description': 'Inclusive line range'}, 'head': {'type': 'integer', 'minimum': 0, 'description': 'First N lines'}, 'tail': {'type': 'integer', 'minimum': 0, 'description': 'Last N lines'}, 'around': {'type': 'object', 'properties': {'line': {'type': 'integer', 'minimum': 1}, 'radius': {'type': 'integer', 'minimum': 0}}, 'required': ['line', 'radius'], 'description': 'Window around a line'}}}, 'strip_comments': {'type': 'boolean', 'description': 'Remove comments (best-effort for .py and // languages)', 'default': False}, 'max_chars': {'type': 'integer', 'minimum': 1, 'description': 'Hard cap on output characters', 'default': 20000}}, 'required': ['path'], 'additionalProperties': False})\n- search_file_content: Search for text patterns in a file and show surrounding context. Returns matching lines with line numbers and configurable context lines. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to the file to search in'}, 'pattern': {'type': 'string', 'description': 'Text pattern to search for (literal text or regex if use_regex is true)'}, 'context_lines': {'type': 'integer', 'description': 'Number of lines to show before and after each match (default: 3)'}, 'use_regex': {'type': 'boolean', 'description': 'Treat pattern as regex instead of literal text (default: false)'}, 'case_sensitive': {'type': 'boolean', 'description': 'Whether search should be case-sensitive (default: true)'}}, 'required': ['path', 'pattern'], 'additionalProperties': False})\n- replace: Search and replace text in a file under the workspace. replace the first or all occurrences. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'path to the file'}, 'old_text': {'type': 'string', 'description': 'content to search for'}, 'new_text': {'type': 'string', 'description': 'content to be replaced'}, 'replace_all': {'type': 'boolean', 'description': 'Replace all occurrences', 'default': True}}, 'required': ['path', 'old_text', 'new_text'], 'additionalProperties': False})\n- find_definition: Find where a function, class, or variable is defined. Searches for definitions matching the symbol name and returns location with context. ({'type': 'object', 'properties': {'symbol': {'type': 'string', 'description': 'Name of the function, class, or variable to find'}, 'path': {'type': 'string', 'description': 'File or directory path to search in (default: current directory)'}, 'symbol_type': {'type': 'string', 'enum': ['any', 'function', 'class', 'variable'], 'description': 'Type of symbol to find (default: any)', 'default': 'any'}, 'context_lines': {'type': 'integer', 'description': 'Number of context lines to show around the definition (default: 5)', 'default': 5}}, 'required': ['symbol'], 'additionalProperties': False})\n\n\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n\nor\n\n```tool\n{\"name\": \"tool_name\", \"args\": {\"k\": \"v\"}}\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected."
+    },
+    {
+      "role": "user",
+      "content": "<pr_description>\nConsider the following PR description:\nAllow to customize the code attribute of ValidationError raised by BaseConstraint.validate\nDescription\n\t\nIt is currently possible to customize the violation_error_message of a ValidationError raised by a constraint but not the code.\nI'd like to add a new violation_error_message parameter to BaseConstraint to allow to easily add one.\nCurrently, to achieve the same result, you have to subclass the constraint to tweak validate to catch and reraise the ValidationError.\nSince the documentation recommends to Provide a descriptive error code to the constructor: when raising a ValidationError in \u200bhttps://docs.djangoproject.com/en/4.1/ref/forms/validation/#raising-validationerror , I think it would make sense to provide this possibility for errors raised by constraints.\nIf you think it would be a good idea, I'd be happy to work on a PR.\n\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE action to execute (bash block or tool block)\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. Exactly one action: either a bash code block with your command, or a tool block\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n\nor\n\n```tool\n{\"name\": \"tool_name\", \"args\": {\"k\": \"v\"}}\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE action (either a bash block or a tool block)\n- A bash action MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple action blocks, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nWhen you've completed your work (reading, editing, testing), and cannot make further progress\nissue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```\n\nThis command will submit your work.\nYou cannot continue working (reading, editing, testing) in any way on this task after submitting.\n</instructions>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: The PR description states that it should be possible to customize the `code` attribute of `ValidationError` raised by `BaseConstraint.validate`. Currently, only `violation_error_message` can be customized. The goal is to add a new `violation_error_code` parameter to `BaseConstraint` to allow this customization.\n\nI need to start by understanding the project structure and identifying the relevant files. I'll begin by listing the files in the current directory.\n\n```bash\nls -F\n```",
+      "extra": {
+        "response": {
+          "id": "VOI1adq9HNOuqtsP1KbsgAs",
+          "created": 1765139027,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: The PR description states that it should be possible to customize the `code` attribute of `ValidationError` raised by `BaseConstraint.validate`. Currently, only `violation_error_message` can be customized. The goal is to add a new `violation_error_code` parameter to `BaseConstraint` to allow this customization.\n\nI need to start by understanding the project structure and identifying the relevant files. I'll begin by listing the files in the current directory.\n\n```bash\nls -F\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 110,
+            "prompt_tokens": 2586,
+            "total_tokens": 2696,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 1013,
+              "text_tokens": 1573,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nAUTHORS\nCONTRIBUTING.rst\nDjango.egg-info/\nGruntfile.js\nINSTALL\nLICENSE\nLICENSE.python\nMANIFEST.in\nREADME.rst\ndjango/\ndocs/\nextras/\njs_tests/\npackage.json\npyproject.toml\nscripts/\nsetup.cfg\nsetup.py\ntests/\ntox.ini\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Okay, I see a `django/` directory, which likely contains the core Django source code. I'll explore that directory to find `BaseConstraint`. I'll start by listing the contents of the `django/` directory.\n\n```bash\nls -F django/\n```",
+      "extra": {
+        "response": {
+          "id": "VeI1abLRI_aHqtsPhOeyiQs",
+          "created": 1765139028,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Okay, I see a `django/` directory, which likely contains the core Django source code. I'll explore that directory to find `BaseConstraint`. I'll start by listing the contents of the `django/` directory.\n\n```bash\nls -F django/\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 62,
+            "prompt_tokens": 2792,
+            "total_tokens": 2854,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": null,
+              "text_tokens": 2792,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n__init__.py\n__main__.py\n__pycache__/\napps/\nconf/\ncontrib/\ncore/\ndb/\ndispatch/\nforms/\nhttp/\nmiddleware/\nshortcuts.py\ntemplate/\ntemplatetags/\ntest/\nurls/\nutils/\nviews/\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Given the context of `ValidationError` and constraints, `django/forms/` or `django/core/` seem like the most probable locations for `BaseConstraint`. I'll start by looking into `django/forms/` as validation errors are often associated with forms.\n\n```bash\nls -F django/forms/\n```",
+      "extra": {
+        "response": {
+          "id": "VuI1ab2LN_KtqtsPoIm2wAY",
+          "created": 1765139029,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Given the context of `ValidationError` and constraints, `django/forms/` or `django/core/` seem like the most probable locations for `BaseConstraint`. I'll start by looking into `django/forms/` as validation errors are often associated with forms.\n\n```bash\nls -F django/forms/\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 72,
+            "prompt_tokens": 2939,
+            "total_tokens": 3011,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 2018,
+              "text_tokens": 921,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n__init__.py\nboundfield.py\nfields.py\nforms.py\nformsets.py\njinja2/\nmodels.py\nrenderers.py\ntemplates/\nutils.py\nwidgets.py\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll check `django/forms/__init__.py` first, as it's a common place for core components to be defined or imported. If `BaseConstraint` isn't there, I'll broaden my search.\n\n```tool\n{\"name\": \"read_file\", \"args\": {\"path\": \"django/forms/__init__.py\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "WOI1abvdBOGmmtkP_oCYgAs",
+          "created": 1765139031,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll check `django/forms/__init__.py` first, as it's a common place for core components to be defined or imported. If `BaseConstraint` isn't there, I'll broaden my search.\n\n```tool\n{\"name\": \"read_file\", \"args\": {\"path\": \"django/forms/__init__.py\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 80,
+            "prompt_tokens": 3078,
+            "total_tokens": 3158,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": null,
+              "text_tokens": 3078,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n\"\"\"\nDjango validation and HTML form handling.\n\"\"\"\n\nfrom django.core.exceptions import ValidationError  # NOQA\nfrom django.forms.boundfield import *  # NOQA\nfrom django.forms.fields import *  # NOQA\nfrom django.forms.forms import *  # NOQA\nfrom django.forms.formsets import *  # NOQA\nfrom django.forms.models import *  # NOQA\nfrom django.forms.widgets import *  # NOQA\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: `BaseConstraint` is not directly defined in `django/forms/__init__.py`. However, I see `ValidationError` is imported from `django.core.exceptions`. This suggests that `BaseConstraint` might be in `django/core/` or one of the files imported in `django/forms/__init__.py`.\n\nSince the PR description mentions `BaseConstraint.validate`, I'll search for `BaseConstraint` within the `django/` directory to pinpoint its exact location.\n\n```bash\ngrep -r \"class BaseConstraint\" django/\n```",
+      "extra": {
+        "response": {
+          "id": "WeI1aaPPHt2kmtkPxq_v2Aw",
+          "created": 1765139032,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: `BaseConstraint` is not directly defined in `django/forms/__init__.py`. However, I see `ValidationError` is imported from `django.core.exceptions`. This suggests that `BaseConstraint` might be in `django/core/` or one of the files imported in `django/forms/__init__.py`.\n\nSince the PR description mentions `BaseConstraint.validate`, I'll search for `BaseConstraint` within the `django/` directory to pinpoint its exact location.\n\n```bash\ngrep -r \"class BaseConstraint\" django/\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 120,
+            "prompt_tokens": 3282,
+            "total_tokens": 3402,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": null,
+              "text_tokens": 3282,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\ndjango/db/models/constraints.py:class BaseConstraint:\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Great, I found `BaseConstraint` in `django/db/models/constraints.py`. Now I need to examine this file to understand how `validate` is implemented and where to add the `violation_error_code` parameter.\n\n```tool\n{\"name\": \"read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "W-I1adbOA9KJmtkP073ByQs",
+          "created": 1765139033,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Great, I found `BaseConstraint` in `django/db/models/constraints.py`. Now I need to examine this file to understand how `validate` is implemented and where to add the `violation_error_code` parameter.\n\n```tool\n{\"name\": \"read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 84,
+            "prompt_tokens": 3436,
+            "total_tokens": 3520,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 3013,
+              "text_tokens": 423,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<warning>\nThe output of your last command was too long.\nPlease try a different command that produces less output.\nIf you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.\nIf you're using grep or find and it produced too much output, you can use a more selective search pattern.\nIf you really need to see something from the full command's output, you can redirect output to a file and then search in that file.\n</warning><output_head>\nimport warnings\nfrom enum import Enum\nfrom types import NoneType\n\nfrom django.core.exceptions import FieldError, ValidationError\nfrom django.db import connections\nfrom django.db.models.expressions import Exists, ExpressionList, F, OrderBy\nfrom django.db.models.indexes import IndexExpression\nfrom django.db.models.lookups import Exact\nfrom django.db.models.query_utils import Q\nfrom django.db.models.sql.query import Query\nfrom django.db.utils import DEFAULT_DB_ALIAS\nfrom django.utils.deprecation import RemovedInDjango60Warning\nfrom django.utils.translation import gettext_lazy as _\n\n__all__ = [\"BaseConstraint\", \"CheckConstraint\", \"Deferrable\", \"UniqueConstraint\"]\n\n\nclass BaseConstraint:\n    default_violation_error_message = _(\"Constraint \u201c%(name)s\u201d is violated.\")\n    violation_error_message = None\n\n    # RemovedInDjango60Warning: When the deprecation ends, replace with:\n    # def __init__(self, *, name, violation_error_message=None):\n    def __init__(self, *args, name=None, violation_error_message=None):\n        # RemovedInDjango60Warning.\n        if name is None and not args:\n            raise TypeError(\n                f\"{self.__class__.__name__}.__init__() missing 1 required keyword-only \"\n                f\"argument: 'name'\"\n            )\n        self.name = name\n        if violation_error_message is not None:\n            self.violation_error_message = violation_error_message\n        else:\n            self.violation_error_message = self.default_violation_error_message\n        # RemovedInDjango60Warning.\n        if args:\n            warnings.warn(\n                f\"Passing positional arguments to {self.__class__.__name__} is \"\n                f\"deprecated.\",\n                RemovedInDjango60Warning,\n                stacklevel=2,\n            )\n            for arg, attr in zip(args, [\"name\", \"violation_error_message\"]):\n                if arg:\n                    setattr(self, attr, arg)\n\n    @property\n    def contains_expressions(self):\n        return False\n\n    def constraint_sql(self, model, schema_editor):\n        raise NotImplementedError(\"This method must be implemented by a subclass.\")\n\n    def create_sql(self, model, schema_editor):\n        raise NotImplementedError(\"This method must be implemented by a subclass.\")\n\n    def remove_sql(self, model, schema_editor):\n        raise NotImplementedError(\"This method must be implemented by a subclass.\")\n\n    def validate(self, model, instance, exclude=None, using=DEFAULT_DB_ALIAS):\n        raise NotImplementedError(\"This method must be implemented by a subclass.\")\n\n    def get_violation_error_message(self):\n        return self.violation_error_message % {\"name\": self.name}\n\n    def deconstruct(self):\n        path = \"%s.%s\" % (self.__class__.__module__, self.__class__.__name__)\n        path = path.replace(\"django.db.models.constraints\", \"django.db.models\")\n        kwargs = {\"name\": self.name}\n        if (\n            self.violation_error_message is not None\n            and self.violation_error_message != self.default_violation_error_message\n        ):\n            kwargs[\"violation_error_message\"] = self.violation_error_message\n        return (path, (), kwargs)\n\n    def clone(self):\n        _, args, kwargs = self.deconstruct()\n        return self.__class__(*args, **kwargs)\n\n\nclass CheckConstraint(BaseConstraint):\n    def __init__(self, *, check, name, violation_error_message=None):\n        self.check = check\n        if not getattr(check, \"conditional\", False):\n            raise TypeError(\n                \"CheckConstraint.check must be a Q instance or boolean expression.\"\n            )\n        super().__init__(name=name, violation_error_message=violation_error_message)\n\n    def _get_check_sql(self, model, schema_editor):\n        query = Query(model=model, alias_cols=False)\n        where = query.build_where(self.check)\n        compiler = query.get_compiler(connection=schema_editor.connection)\n        sql, params = where.as_sql(compiler, schema_editor.connection)\n        return sql % tuple(schema_editor.quote_value(p) for p in params)\n\n    def constraint_sql(self, model, schema_editor):\n        check = self._get_check_sql(model, schema_editor)\n        return schema_editor._check_sql(self.name, check)\n\n    def create_sql(self, model, schema_editor):\n        check = self._get_check_sql(model, schema_editor)\n        return schema_editor._create_check_sql(model, self.name, check)\n\n    def remove_sql(self, model, schema_editor):\n        return schema_editor._delete_check_sql(model, self.name)\n\n    def validate(self, model, instance, exclude=None, using=DEFAULT_DB_ALIAS):\n        against = instance._get_field_value_map(meta=model._meta, exclude=exclude)\n        try:\n            if not Q(self.check).check(against, using=using):\n                raise ValidationError(self.get_violation_error_message())\n        except FieldError:\n            pass\n\n    def __repr__(self):\n        return \"<%s: check=%s name=%s%s>\" % (\n            self.__class__.__qualname__,\n            self.che\n</output_head>\n<elided_chars>\n6863 characters elided\n</elided_chars>\n<output_tail>\nr(self.fields),\n            \"\" if not self.expressions else \" expressions=%s\" % repr(self.expressions),\n            \" name=%s\" % repr(self.name),\n            \"\" if self.condition is None else \" condition=%s\" % self.condition,\n            \"\" if self.deferrable is None else \" deferrable=%r\" % self.deferrable,\n            \"\" if not self.include else \" include=%s\" % repr(self.include),\n            \"\" if not self.opclasses else \" opclasses=%s\" % repr(self.opclasses),\n            (\n                \"\"\n                if self.violation_error_message is None\n                or self.violation_error_message == self.default_violation_error_message\n                else \" violation_error_message=%r\" % self.violation_error_message\n            ),\n        )\n\n    def __eq__(self, other):\n        if isinstance(other, UniqueConstraint):\n            return (\n                self.name == other.name\n                and self.fields == other.fields\n                and self.condition == other.condition\n                and self.deferrable == other.deferrable\n                and self.include == other.include\n                and self.opclasses == other.opclasses\n                and self.expressions == other.expressions\n                and self.violation_error_message == other.violation_error_message\n            )\n        return super().__eq__(other)\n\n    def deconstruct(self):\n        path, args, kwargs = super().deconstruct()\n        if self.fields:\n            kwargs[\"fields\"] = self.fields\n        if self.condition:\n            kwargs[\"condition\"] = self.condition\n        if self.deferrable:\n            kwargs[\"deferrable\"] = self.deferrable\n        if self.include:\n            kwargs[\"include\"] = self.include\n        if self.opclasses:\n            kwargs[\"opclasses\"] = self.opclasses\n        return path, self.expressions, kwargs\n\n    def validate(self, model, instance, exclude=None, using=DEFAULT_DB_ALIAS):\n        queryset = model._default_manager.using(using)\n        if self.fields:\n            lookup_kwargs = {}\n            for field_name in self.fields:\n                if exclude and field_name in exclude:\n                    return\n                field = model._meta.get_field(field_name)\n                lookup_value = getattr(instance, field.attname)\n                if lookup_value is None or (\n                    lookup_value == \"\"\n                    and connections[using].features.interprets_empty_strings_as_nulls\n                ):\n                    # A composite constraint containing NULL value cannot cause\n                    # a violation since NULL != NULL in SQL.\n                    return\n                lookup_kwargs[field.name] = lookup_value\n            queryset = queryset.filter(**lookup_kwargs)\n        else:\n            # Ignore constraints with excluded fields.\n            if exclude:\n                for expression in self.expressions:\n                    if hasattr(expression, \"flatten\"):\n                        for expr in expression.flatten():\n                            if isinstance(expr, F) and expr.name in exclude:\n                                return\n                    elif isinstance(expression, F) and expression.name in exclude:\n                        return\n            replacements = {\n                F(field): value\n                for field, value in instance._get_field_value_map(\n                    meta=model._meta, exclude=exclude\n                ).items()\n            }\n            expressions = []\n            for expr in self.expressions:\n                # Ignore ordering.\n                if isinstance(expr, OrderBy):\n                    expr = expr.expression\n                expressions.append(Exact(expr, expr.replace_expressions(replacements)))\n            queryset = queryset.filter(*expressions)\n        model_class_pk = instance._get_pk_val(model._meta)\n        if not instance._state.adding and model_class_pk is not None:\n            queryset = queryset.exclude(pk=model_class_pk)\n        if not self.condition:\n            if queryset.exists():\n                if self.expressions:\n                    raise ValidationError(self.get_violation_error_message())\n                # When fields are defined, use the unique_error_message() for\n                # backward compatibility.\n                for model, constraints in instance.get_constraints():\n                    for constraint in constraints:\n                        if constraint is self:\n                            raise ValidationError(\n                                instance.unique_error_message(model, self.fields)\n                            )\n        else:\n            against = instance._get_field_value_map(meta=model._meta, exclude=exclude)\n            try:\n                if (self.condition & Exists(queryset.filter(self.condition))).check(\n                    against, using=using\n                ):\n                    raise ValidationError(self.get_violation_error_message())\n            except FieldError:\n                pass\n\n</output_tail>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I have the content of `django/db/models/constraints.py`. I need to modify `BaseConstraint` to accept a `violation_error_code` parameter in its `__init__` method and store it. Then, when `ValidationError` is raised, I need to pass this `code` to it.\n\nLooking at the `BaseConstraint` class:\n- It has `default_violation_error_message` and `violation_error_message`. I'll add `default_violation_error_code` and `violation_error_code` similarly.\n- The `__init__` method handles `name` and `violation_error_message`. I'll add `violation_error_code` there.\n- The `validate` method is `NotImplementedError` in `BaseConstraint`, so I need to look at its subclasses, specifically `CheckConstraint` and `UniqueConstraint`, to see where `ValidationError` is actually raised.\n\nFirst, I'll modify `BaseConstraint` to include `violation_error_code`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"    violation_error_message = None\", \"new_text\": \"    violation_error_message = None\\n    default_violation_error_code = \\\"unique\\\"\\n    violation_error_code = None\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "XuI1aYLLC_K2qtsP5_v-uAY",
+          "created": 1765139035,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I have the content of `django/db/models/constraints.py`. I need to modify `BaseConstraint` to accept a `violation_error_code` parameter in its `__init__` method and store it. Then, when `ValidationError` is raised, I need to pass this `code` to it.\n\nLooking at the `BaseConstraint` class:\n- It has `default_violation_error_message` and `violation_error_message`. I'll add `default_violation_error_code` and `violation_error_code` similarly.\n- The `__init__` method handles `name` and `violation_error_message`. I'll add `violation_error_code` there.\n- The `validate` method is `NotImplementedError` in `BaseConstraint`, so I need to look at its subclasses, specifically `CheckConstraint` and `UniqueConstraint`, to see where `ValidationError` is actually raised.\n\nFirst, I'll modify `BaseConstraint` to include `violation_error_code`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"    violation_error_message = None\", \"new_text\": \"    violation_error_message = None\\n    default_violation_error_code = \\\"unique\\\"\\n    violation_error_code = None\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 319,
+            "prompt_tokens": 6097,
+            "total_tokens": 6416,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 2023,
+              "text_tokens": 4074,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now I need to modify the `__init__` method of `BaseConstraint` to accept `violation_error_code` and store it. I'll add it as a keyword argument, similar to `violation_error_message`. I also need to update the `deconstruct` method to include the new parameter.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"    def __init__(self, *args, name=None, violation_error_message=None):\", \"new_text\": \"    def __init__(self, *args, name=None, violation_error_message=None, violation_error_code=None):\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "YOI1aY7KE-SdqtsP_vm8-Ao",
+          "created": 1765139038,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now I need to modify the `__init__` method of `BaseConstraint` to accept `violation_error_code` and store it. I'll add it as a keyword argument, similar to `violation_error_message`. I also need to update the `deconstruct` method to include the new parameter.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"    def __init__(self, *args, name=None, violation_error_message=None):\", \"new_text\": \"    def __init__(self, *args, name=None, violation_error_message=None, violation_error_code=None):\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 166,
+            "prompt_tokens": 6453,
+            "total_tokens": 6619,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 6065,
+              "text_tokens": 388,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now that I've added `violation_error_code` to the `__init__` signature, I need to handle its assignment within the `__init__` method, similar to how `violation_error_message` is handled.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"        if violation_error_message is not None:\n            self.violation_error_message = violation_error_message\n        else:\n            self.violation_error_message = self.default_violation_error_message\"\"\", \"new_text\": \"\"\"        if violation_error_message is not None:\n            self.violation_error_message = violation_error_message\n        else:\n            self.violation_error_message = self.default_violation_error_message\n        if violation_error_code is not None:\n            self.violation_error_code = violation_error_code\n        else:\n            self.violation_error_code = self.default_violation_error_code\"\"\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "YuI1aZ2OOMaP6dkP4_KIqAs",
+          "created": 1765139041,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now that I've added `violation_error_code` to the `__init__` signature, I need to handle its assignment within the `__init__` method, similar to how `violation_error_message` is handled.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"        if violation_error_message is not None:\n            self.violation_error_message = violation_error_message\n        else:\n            self.violation_error_message = self.default_violation_error_message\"\"\", \"new_text\": \"\"\"        if violation_error_message is not None:\n            self.violation_error_message = violation_error_message\n        else:\n            self.violation_error_message = self.default_violation_error_message\n        if violation_error_code is not None:\n            self.violation_error_code = violation_error_code\n        else:\n            self.violation_error_code = self.default_violation_error_code\"\"\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 256,
+            "prompt_tokens": 6656,
+            "total_tokens": 6912,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 3030,
+              "text_tokens": 3626,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "Invalid tool payload: Expecting ',' delimiter: line 1 column 87 (char 86)"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: My apologies, the `replace` tool expects a valid JSON string, and I made a mistake in escaping the newlines within the `new_text` argument. I need to ensure the `new_text` is a single string literal. I will try again, making sure the newlines are properly represented within the string.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        if violation_error_message is not None:\\n            self.violation_error_message = violation_error_message\\n        else:\\n            self.violation_error_message = self.default_violation_error_message\", \"new_text\": \"        if violation_error_message is not None:\\n            self.violation_error_message = violation_error_message\\n        else:\\n            self.violation_error_message = self.default_violation_error_message\\n        if violation_error_code is not None:\\n            self.violation_error_code = violation_error_code\\n        else:\\n            self.violation_error_code = self.default_violation_error_code\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "ZOI1afTNJtO0qtsP1ZiHwQY",
+          "created": 1765139042,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: My apologies, the `replace` tool expects a valid JSON string, and I made a mistake in escaping the newlines within the `new_text` argument. I need to ensure the `new_text` is a single string literal. I will try again, making sure the newlines are properly represented within the string.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        if violation_error_message is not None:\\n            self.violation_error_message = violation_error_message\\n        else:\\n            self.violation_error_message = self.default_violation_error_message\", \"new_text\": \"        if violation_error_message is not None:\\n            self.violation_error_message = violation_error_message\\n        else:\\n            self.violation_error_message = self.default_violation_error_message\\n        if violation_error_code is not None:\\n            self.violation_error_code = violation_error_code\\n        else:\\n            self.violation_error_code = self.default_violation_error_code\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 273,
+            "prompt_tokens": 6936,
+            "total_tokens": 7209,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 6057,
+              "text_tokens": 879,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now I need to update the `deconstruct` method in `BaseConstraint` to include `violation_error_code` in the `kwargs` if it's not the default.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"        if (\n            self.violation_error_message is not None\n            and self.violation_error_message != self.default_violation_error_message\n        ):\n            kwargs[\"violation_error_message\"] = self.violation_error_message\"\"\", \"new_text\": \"\"\"        if (\n            self.violation_error_message is not None\n            and self.violation_error_message != self.default_violation_error_message\n        ):\n            kwargs[\"violation_error_message\"] = self.violation_error_message\n        if (\n            self.violation_error_code is not None\n            and self.violation_error_code != self.default_violation_error_code\n        ):\n            kwargs[\"violation_error_code\"] = self.violation_error_code\"\"\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "Z-I1aZSYE9DjqtsPxIvSsQg",
+          "created": 1765139045,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now I need to update the `deconstruct` method in `BaseConstraint` to include `violation_error_code` in the `kwargs` if it's not the default.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"        if (\n            self.violation_error_message is not None\n            and self.violation_error_message != self.default_violation_error_message\n        ):\n            kwargs[\"violation_error_message\"] = self.violation_error_message\"\"\", \"new_text\": \"\"\"        if (\n            self.violation_error_message is not None\n            and self.violation_error_message != self.default_violation_error_message\n        ):\n            kwargs[\"violation_error_message\"] = self.violation_error_message\n        if (\n            self.violation_error_code is not None\n            and self.violation_error_code != self.default_violation_error_code\n        ):\n            kwargs[\"violation_error_code\"] = self.violation_error_code\"\"\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 270,
+            "prompt_tokens": 7246,
+            "total_tokens": 7516,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 6054,
+              "text_tokens": 1192,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "Invalid tool payload: Expecting ',' delimiter: line 1 column 87 (char 86)"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I made the same mistake again with the newlines in the `new_text` argument. I need to be more careful. I will correct the `replace` command to properly escape the newlines.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        if (\\n            self.violation_error_message is not None\\n            and self.violation_error_message != self.default_violation_error_message\\n        ):\\n            kwargs[\\\"violation_error_message\\\"] = self.violation_error_message\", \"new_text\": \"        if (\\n            self.violation_error_message is not None\\n            and self.violation_error_message != self.default_violation_error_message\\n        ):\\n            kwargs[\\\"violation_error_message\\\"] = self.violation_error_message\\n        if (\\n            self.violation_error_code is not None\\n            and self.violation_error_code != self.default_violation_error_code\\n        ):\\n            kwargs[\\\"violation_error_code\\\"] = self.violation_error_code\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "aOI1acLIOsiKqtsPgZvtuQY",
+          "created": 1765139047,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I made the same mistake again with the newlines in the `new_text` argument. I need to be more careful. I will correct the `replace` command to properly escape the newlines.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        if (\\n            self.violation_error_message is not None\\n            and self.violation_error_message != self.default_violation_error_message\\n        ):\\n            kwargs[\\\"violation_error_message\\\"] = self.violation_error_message\", \"new_text\": \"        if (\\n            self.violation_error_message is not None\\n            and self.violation_error_message != self.default_violation_error_message\\n        ):\\n            kwargs[\\\"violation_error_message\\\"] = self.violation_error_message\\n        if (\\n            self.violation_error_code is not None\\n            and self.violation_error_code != self.default_violation_error_code\\n        ):\\n            kwargs[\\\"violation_error_code\\\"] = self.violation_error_code\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 281,
+            "prompt_tokens": 7540,
+            "total_tokens": 7821,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": null,
+              "text_tokens": 7540,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now that `BaseConstraint` is updated, I need to propagate the `violation_error_code` to its subclasses, specifically `CheckConstraint` and `UniqueConstraint`, where `ValidationError` is actually raised.\n\nFirst, I'll modify `CheckConstraint`'s `__init__` method to accept `violation_error_code` and pass it to the `super().__init__` call.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"    def __init__(self, *, check, name, violation_error_message=None):\", \"new_text\": \"    def __init__(self, *, check, name, violation_error_message=None, violation_error_code=None):\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "a-I1ab-SEPmkqtsPmp3lwAg",
+          "created": 1765139049,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now that `BaseConstraint` is updated, I need to propagate the `violation_error_code` to its subclasses, specifically `CheckConstraint` and `UniqueConstraint`, where `ValidationError` is actually raised.\n\nFirst, I'll modify `CheckConstraint`'s `__init__` method to accept `violation_error_code` and pass it to the `super().__init__` call.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"    def __init__(self, *, check, name, violation_error_message=None):\", \"new_text\": \"    def __init__(self, *, check, name, violation_error_message=None, violation_error_code=None):\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 180,
+            "prompt_tokens": 7858,
+            "total_tokens": 8038,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 7057,
+              "text_tokens": 801,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now I need to pass the `violation_error_code` to the `super().__init__` call in `CheckConstraint`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        super().__init__(name=name, violation_error_message=violation_error_message)\", \"new_text\": \"        super().__init__(\\n            name=name,\\n            violation_error_message=violation_error_message,\\n            violation_error_code=violation_error_code,\\n        )\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "beI1acSdGvDmqtsP3c7f-Ao",
+          "created": 1765139052,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now I need to pass the `violation_error_code` to the `super().__init__` call in `CheckConstraint`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        super().__init__(name=name, violation_error_message=violation_error_message)\", \"new_text\": \"        super().__init__(\\n            name=name,\\n            violation_error_message=violation_error_message,\\n            violation_error_code=violation_error_code,\\n        )\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 142,
+            "prompt_tokens": 8075,
+            "total_tokens": 8217,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 3022,
+              "text_tokens": 5053,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 2 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: It seems like the previous `replace` command replaced two occurrences. This is fine as long as both were intended. I will now modify the `validate` method in `CheckConstraint` to pass the `violation_error_code` to `ValidationError`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"                raise ValidationError(self.get_violation_error_message())\", \"new_text\": \"                raise ValidationError(\\n                    self.get_violation_error_message(), code=self.violation_error_code\\n                )\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "cOI1acCRE8aFqtsPv4eM0QY",
+          "created": 1765139054,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: It seems like the previous `replace` command replaced two occurrences. This is fine as long as both were intended. I will now modify the `validate` method in `CheckConstraint` to pass the `violation_error_code` to `ValidationError`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"                raise ValidationError(self.get_violation_error_message())\", \"new_text\": \"                raise ValidationError(\\n                    self.get_violation_error_message(), code=self.violation_error_code\\n                )\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 144,
+            "prompt_tokens": 8254,
+            "total_tokens": 8398,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 8056,
+              "text_tokens": 198,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 3 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: It seems like the previous `replace` command replaced three occurrences. This is fine as long as all were intended. Now I need to do the same for `UniqueConstraint`.\n\nFirst, I'll modify `UniqueConstraint`'s `__init__` method to accept `violation_error_code` and pass it to the `super().__init__` call.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"    def __init__(\\n        self,\\n        *expressions,\\n        fields=(),\\n        name=None,\\n        condition=None,\\n        deferrable=None,\\n        include=None,\\n        opclasses=None,\\n        violation_error_message=None,\\n    ):\", \"new_text\": \"    def __init__(\\n        self,\\n        *expressions,\\n        fields=(),\\n        name=None,\\n        condition=None,\\n        deferrable=None,\\n        include=None,\\n        opclasses=None,\\n        violation_error_message=None,\\n        violation_error_code=None,\\n    ):\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "cuI1aeHmNrqoqtsPq86J6Ao",
+          "created": 1765139057,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: It seems like the previous `replace` command replaced three occurrences. This is fine as long as all were intended. Now I need to do the same for `UniqueConstraint`.\n\nFirst, I'll modify `UniqueConstraint`'s `__init__` method to accept `violation_error_code` and pass it to the `super().__init__` call.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"    def __init__(\\n        self,\\n        *expressions,\\n        fields=(),\\n        name=None,\\n        condition=None,\\n        deferrable=None,\\n        include=None,\\n        opclasses=None,\\n        violation_error_message=None,\\n    ):\", \"new_text\": \"    def __init__(\\n        self,\\n        *expressions,\\n        fields=(),\\n        name=None,\\n        condition=None,\\n        deferrable=None,\\n        include=None,\\n        opclasses=None,\\n        violation_error_message=None,\\n        violation_error_code=None,\\n    ):\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 268,
+            "prompt_tokens": 8435,
+            "total_tokens": 8703,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 2012,
+              "text_tokens": 6423,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nNo replacements made (text not found)</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: It seems the `old_text` for `UniqueConstraint.__init__` didn't match exactly. This could be due to subtle whitespace differences or other changes. I will use `refined_read_file` to get the exact content of the `UniqueConstraint.__init__` method and then construct the `replace` command more accurately. I'll look for the `__init__` method of `UniqueConstraint`.\n\n```tool\n{\"name\": \"find_definition\", \"args\": {\"symbol\": \"UniqueConstraint.__init__\", \"path\": \"django/db/models/constraints.py\", \"context_lines\": 10}}\n```",
+      "extra": {
+        "response": {
+          "id": "dOI1abzpKr-qqtsP_s6RsQY",
+          "created": 1765139059,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: It seems the `old_text` for `UniqueConstraint.__init__` didn't match exactly. This could be due to subtle whitespace differences or other changes. I will use `refined_read_file` to get the exact content of the `UniqueConstraint.__init__` method and then construct the `replace` command more accurately. I'll look for the `__init__` method of `UniqueConstraint`.\n\n```tool\n{\"name\": \"find_definition\", \"args\": {\"symbol\": \"UniqueConstraint.__init__\", \"path\": \"django/db/models/constraints.py\", \"context_lines\": 10}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 140,
+            "prompt_tokens": 8729,
+            "total_tokens": 8869,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 7042,
+              "text_tokens": 1687,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nNo definition found for 'UniqueConstraint.__init__' (type: any) in /testbed/django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: It seems `find_definition` didn't work for `UniqueConstraint.__init__`. This might be because it's a method within a class. I'll try to find the `UniqueConstraint` class definition and then manually locate its `__init__` method.\n\n```tool\n{\"name\": \"find_definition\", \"args\": {\"symbol\": \"UniqueConstraint\", \"path\": \"django/db/models/constraints.py\", \"symbol_type\": \"class\", \"context_lines\": 20}}\n```",
+      "extra": {
+        "response": {
+          "id": "d-I1affdGK6ymtkP5-CwyAY",
+          "created": 1765139062,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: It seems `find_definition` didn't work for `UniqueConstraint.__init__`. This might be because it's a method within a class. I'll try to find the `UniqueConstraint` class definition and then manually locate its `__init__` method.\n\n```tool\n{\"name\": \"find_definition\", \"args\": {\"symbol\": \"UniqueConstraint\", \"path\": \"django/db/models/constraints.py\", \"symbol_type\": \"class\", \"context_lines\": 20}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 115,
+            "prompt_tokens": 8917,
+            "total_tokens": 9032,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 8044,
+              "text_tokens": 873,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nNo definition found for 'UniqueConstraint' (type: class) in /testbed/django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: That's unexpected. I know `UniqueConstraint` is in that file because I saw it in the `grep` output and the truncated file content. The `find_definition` tool might not be working as expected for this specific scenario.\n\nI will manually search for `class UniqueConstraint` in the file and then read the lines around it to get the `__init__` method.\n\n```bash\ngrep -n \"class UniqueConstraint\" django/db/models/constraints.py\n```",
+      "extra": {
+        "response": {
+          "id": "eeI1aejuB7OzmtkP0_DEuAY",
+          "created": 1765139063,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: That's unexpected. I know `UniqueConstraint` is in that file because I saw it in the `grep` output and the truncated file content. The `find_definition` tool might not be working as expected for this specific scenario.\n\nI will manually search for `class UniqueConstraint` in the file and then read the lines around it to get the `__init__` method.\n\n```bash\ngrep -n \"class UniqueConstraint\" django/db/models/constraints.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 106,
+            "prompt_tokens": 9078,
+            "total_tokens": 9184,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 8040,
+              "text_tokens": 1038,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n173:class UniqueConstraint(BaseConstraint):\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Okay, `UniqueConstraint` is on line 173. I'll read the file from line 173 with a good number of context lines to get the `__init__` method.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"around\": {\"line\": 173, \"radius\": 20}}}}\n```",
+      "extra": {
+        "response": {
+          "id": "euI1aeGBHauUmtkPmYTBsAY",
+          "created": 1765139065,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Okay, `UniqueConstraint` is on line 173. I'll read the file from line 173 with a good number of context lines to get the `__init__` method.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"around\": {\"line\": 173, \"radius\": 20}}}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 100,
+            "prompt_tokens": 9215,
+            "total_tokens": 9315,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 9040,
+              "text_tokens": 175,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n{\n  \"path\": \"django/db/models/constraints.py\",\n  \"encoding\": \"utf-8\",\n  \"start_line\": 153,\n  \"line_count\": 41,\n  \"truncated\": false,\n  \"content\": \"                and self.check == other.check\\n                and self.violation_error_message == other.violation_error_message\\n            )\\n        return super().__eq__(other)\\n\\n    def deconstruct(self):\\n        path, args, kwargs = super().deconstruct()\\n        kwargs[\\\"check\\\"] = self.check\\n        return path, args, kwargs\\n\\n\\nclass Deferrable(Enum):\\n    DEFERRED = \\\"deferred\\\"\\n    IMMEDIATE = \\\"immediate\\\"\\n\\n    # A similar format was proposed for Python 3.10.\\n    def __repr__(self):\\n        return f\\\"{self.__class__.__qualname__}.{self._name_}\\\"\\n\\n\\nclass UniqueConstraint(BaseConstraint):\\n    def __init__(\\n        self,\\n        *expressions,\\n        fields=(),\\n        name=None,\\n        condition=None,\\n        deferrable=None,\\n        include=None,\\n        opclasses=(),\\n        violation_error_message=None,\\n    ):\\n        if not name:\\n            raise ValueError(\\\"A unique constraint must be named.\\\")\\n        if not expressions and not fields:\\n            raise ValueError(\\n                \\\"At least one field or expression is required to define a \\\"\\n                \\\"unique constraint.\\\"\\n            )\\n        if expressions and fields:\\n            raise ValueError(\\n\"\n}</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now I have the exact `__init__` signature for `UniqueConstraint`. I can see the `opclasses=()` was the difference. I will add `violation_error_code=None` to the `__init__` method.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        violation_error_message=None,\\n    ):\", \"new_text\": \"        violation_error_message=None,\\n        violation_error_code=None,\\n    ):\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "fOI1aam4BZOlqtsPto-N-Ao",
+          "created": 1765139066,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now I have the exact `__init__` signature for `UniqueConstraint`. I can see the `opclasses=()` was the difference. I will add `violation_error_code=None` to the `__init__` method.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        violation_error_message=None,\\n    ):\", \"new_text\": \"        violation_error_message=None,\\n        violation_error_code=None,\\n    ):\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 134,
+            "prompt_tokens": 9715,
+            "total_tokens": 9849,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 8037,
+              "text_tokens": 1678,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now I need to pass `violation_error_code` to the `super().__init__` call within `UniqueConstraint.__init__`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"        super().__init__(name=name, violation_error_message=violation_error_message)\"\"\", \"new_text\": \"\"\"        super().__init__(\n            name=name,\n            violation_error_message=violation_error_message,\n            violation_error_code=violation_error_code,\n        )\"\"\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "fuI1adeyC8K4qtsPwc2f2Qk",
+          "created": 1765139068,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now I need to pass `violation_error_code` to the `super().__init__` call within `UniqueConstraint.__init__`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"        super().__init__(name=name, violation_error_message=violation_error_message)\"\"\", \"new_text\": \"\"\"        super().__init__(\n            name=name,\n            violation_error_message=violation_error_message,\n            violation_error_code=violation_error_code,\n        )\"\"\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 145,
+            "prompt_tokens": 9886,
+            "total_tokens": 10031,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 9037,
+              "text_tokens": 849,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "Invalid tool payload: Expecting ',' delimiter: line 1 column 87 (char 86)"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I made the newline escaping mistake again. I need to be more careful. I will correct the `replace` command to properly escape the newlines.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        super().__init__(name=name, violation_error_message=violation_error_message)\", \"new_text\": \"        super().__init__(\\n            name=name,\\n            violation_error_message=violation_error_message,\\n            violation_error_code=violation_error_code,\\n        )\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "f-I1abClHJ-HqtsP_eGKyQY",
+          "created": 1765139070,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I made the newline escaping mistake again. I need to be more careful. I will correct the `replace` command to properly escape the newlines.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"        super().__init__(name=name, violation_error_message=violation_error_message)\", \"new_text\": \"        super().__init__(\\n            name=name,\\n            violation_error_message=violation_error_message,\\n            violation_error_code=violation_error_code,\\n        )\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 144,
+            "prompt_tokens": 10055,
+            "total_tokens": 10199,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 9033,
+              "text_tokens": 1022,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nNo replacements made (text not found)</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: It seems the `super().__init__` call in `UniqueConstraint` is not exactly as I expected. I need to re-examine the `UniqueConstraint.__init__` method to find the correct `super().__init__` call. I'll use `refined_read_file` again, focusing on the `UniqueConstraint` class.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"around\": {\"line\": 173, \"radius\": 30}}}}\n```",
+      "extra": {
+        "response": {
+          "id": "guI1af6lHaiymtkP2JTHyAY",
+          "created": 1765139071,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: It seems the `super().__init__` call in `UniqueConstraint` is not exactly as I expected. I need to re-examine the `UniqueConstraint.__init__` method to find the correct `super().__init__` call. I'll use `refined_read_file` again, focusing on the `UniqueConstraint` class.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"around\": {\"line\": 173, \"radius\": 30}}}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 128,
+            "prompt_tokens": 10225,
+            "total_tokens": 10353,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 7023,
+              "text_tokens": 3202,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n{\n  \"path\": \"django/db/models/constraints.py\",\n  \"encoding\": \"utf-8\",\n  \"start_line\": 143,\n  \"line_count\": 61,\n  \"truncated\": false,\n  \"content\": \"                if self.violation_error_message is None\\n                or self.violation_error_message == self.default_violation_error_message\\n                else \\\" violation_error_message=%r\\\" % self.violation_error_message\\n            ),\\n        )\\n\\n    def __eq__(self, other):\\n        if isinstance(other, CheckConstraint):\\n            return (\\n                self.name == other.name\\n                and self.check == other.check\\n                and self.violation_error_message == other.violation_error_message\\n            )\\n        return super().__eq__(other)\\n\\n    def deconstruct(self):\\n        path, args, kwargs = super().deconstruct()\\n        kwargs[\\\"check\\\"] = self.check\\n        return path, args, kwargs\\n\\n\\nclass Deferrable(Enum):\\n    DEFERRED = \\\"deferred\\\"\\n    IMMEDIATE = \\\"immediate\\\"\\n\\n    # A similar format was proposed for Python 3.10.\\n    def __repr__(self):\\n        return f\\\"{self.__class__.__qualname__}.{self._name_}\\\"\\n\\n\\nclass UniqueConstraint(BaseConstraint):\\n    def __init__(\\n        self,\\n        *expressions,\\n        fields=(),\\n        name=None,\\n        condition=None,\\n        deferrable=None,\\n        include=None,\\n        opclasses=(),\\n        violation_error_message=None,\\n        violation_error_code=None,\\n    ):\\n        if not name:\\n            raise ValueError(\\\"A unique constraint must be named.\\\")\\n        if not expressions and not fields:\\n            raise ValueError(\\n                \\\"At least one field or expression is required to define a \\\"\\n                \\\"unique constraint.\\\"\\n            )\\n        if expressions and fields:\\n            raise ValueError(\\n                \\\"UniqueConstraint.fields and expressions are mutually exclusive.\\\"\\n            )\\n        if not isinstance(condition, (NoneType, Q)):\\n            raise ValueError(\\\"UniqueConstraint.condition must be a Q instance.\\\")\\n        if condition and deferrable:\\n            raise ValueError(\\\"UniqueConstraint with conditions cannot be deferred.\\\")\\n        if include and deferrable:\\n            raise ValueError(\\\"UniqueConstraint with include fields cannot be deferred.\\\")\\n        if opclasses and deferrable:\\n\"\n}</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I see now! `UniqueConstraint` does not call `super().__init__` directly in the code snippet I'm looking at. It seems to handle its own initialization and then relies on the `BaseConstraint`'s `__init__` being called implicitly or through a different mechanism.\n\nLooking at the `deconstruct` method of `UniqueConstraint`, it calls `super().deconstruct()`. This implies that the `__init__` of `BaseConstraint` is eventually called.\n\nHowever, the `violation_error_message` is passed to `super().__init__` in `CheckConstraint`, but not explicitly in `UniqueConstraint`. This means `UniqueConstraint` is not directly passing `violation_error_message` to `BaseConstraint`'s `__init__`. Instead, it's likely relying on `BaseConstraint`'s default handling of `violation_error_message` and then setting its own `self.violation_error_message` later.\n\nLet me check the `UniqueConstraint`'s `__eq__` and `deconstruct` methods to see how `violation_error_message` is handled.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"range\": {\"start\": 240, \"end\": 280}}}}\n```",
+      "extra": {
+        "response": {
+          "id": "heI1aZDbAuenqtsP7a_l2Qs",
+          "created": 1765139074,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I see now! `UniqueConstraint` does not call `super().__init__` directly in the code snippet I'm looking at. It seems to handle its own initialization and then relies on the `BaseConstraint`'s `__init__` being called implicitly or through a different mechanism.\n\nLooking at the `deconstruct` method of `UniqueConstraint`, it calls `super().deconstruct()`. This implies that the `__init__` of `BaseConstraint` is eventually called.\n\nHowever, the `violation_error_message` is passed to `super().__init__` in `CheckConstraint`, but not explicitly in `UniqueConstraint`. This means `UniqueConstraint` is not directly passing `violation_error_message` to `BaseConstraint`'s `__init__`. Instead, it's likely relying on `BaseConstraint`'s default handling of `violation_error_message` and then setting its own `self.violation_error_message` later.\n\nLet me check the `UniqueConstraint`'s `__eq__` and `deconstruct` methods to see how `violation_error_message` is handled.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"range\": {\"start\": 240, \"end\": 280}}}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 301,
+            "prompt_tokens": 10973,
+            "total_tokens": 11274,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 8031,
+              "text_tokens": 2942,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n{\n  \"path\": \"django/db/models/constraints.py\",\n  \"encoding\": \"utf-8\",\n  \"start_line\": 240,\n  \"line_count\": 41,\n  \"truncated\": false,\n  \"content\": \"    @property\\n    def contains_expressions(self):\\n        return bool(self.expressions)\\n\\n    def _get_condition_sql(self, model, schema_editor):\\n        if self.condition is None:\\n            return None\\n        query = Query(model=model, alias_cols=False)\\n        where = query.build_where(self.condition)\\n        compiler = query.get_compiler(connection=schema_editor.connection)\\n        sql, params = where.as_sql(compiler, schema_editor.connection)\\n        return sql % tuple(schema_editor.quote_value(p) for p in params)\\n\\n    def _get_index_expressions(self, model, schema_editor):\\n        if not self.expressions:\\n            return None\\n        index_expressions = []\\n        for expression in self.expressions:\\n            index_expression = IndexExpression(expression)\\n            index_expression.set_wrapper_classes(schema_editor.connection)\\n            index_expressions.append(index_expression)\\n        return ExpressionList(*index_expressions).resolve_expression(\\n            Query(model, alias_cols=False),\\n        )\\n\\n    def constraint_sql(self, model, schema_editor):\\n        fields = [model._meta.get_field(field_name) for field_name in self.fields]\\n        include = [\\n            model._meta.get_field(field_name).column for field_name in self.include\\n        ]\\n        condition = self._get_condition_sql(model, schema_editor)\\n        expressions = self._get_index_expressions(model, schema_editor)\\n        return schema_editor._unique_sql(\\n            model,\\n            fields,\\n            self.name,\\n            condition=condition,\\n            deferrable=self.deferrable,\\n            include=include,\\n            opclasses=self.opclasses,\\n            expressions=expressions,\\n\"\n}</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'm still not seeing the `super().__init__` call in `UniqueConstraint`. This means `UniqueConstraint` is *not* calling `BaseConstraint.__init__` directly. Instead, it's likely that `UniqueConstraint` is *not* inheriting the `__init__` from `BaseConstraint` in the way I assumed.\n\nLet's re-evaluate. `BaseConstraint` has `default_violation_error_message` and `violation_error_message`. `UniqueConstraint` also has `violation_error_message` as a parameter in its `__init__`. This suggests that `UniqueConstraint` is handling `violation_error_message` itself, and not relying on `BaseConstraint`'s `__init__` for it.\n\nTherefore, I need to:\n1. Add `self.violation_error_code = violation_error_code` (or `self.default_violation_error_code` if `None`) directly within `UniqueConstraint.__init__`.\n2. Update `UniqueConstraint.__eq__` to include `violation_error_code`.\n3. Update `UniqueConstraint.deconstruct` to include `violation_error_code`.\n4. Modify the `validate` method in `UniqueConstraint` to pass `code=self.violation_error_code` to `ValidationError`.\n\nLet's start by adding the `violation_error_code` assignment in `UniqueConstraint.__init__`. I'll place it after the `violation_error_message` assignment. I need to find the exact line where `violation_error_message` is assigned in `UniqueConstraint`.\n\nI'll read the `UniqueConstraint` class definition again, but this time I'll look for the assignment of `violation_error_message`.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"around\": {\"line\": 173, \"radius\": 50}}}}\n```",
+      "extra": {
+        "response": {
+          "id": "h-I1aYquO5C6qtsPoJmL8Qo",
+          "created": 1765139077,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'm still not seeing the `super().__init__` call in `UniqueConstraint`. This means `UniqueConstraint` is *not* calling `BaseConstraint.__init__` directly. Instead, it's likely that `UniqueConstraint` is *not* inheriting the `__init__` from `BaseConstraint` in the way I assumed.\n\nLet's re-evaluate. `BaseConstraint` has `default_violation_error_message` and `violation_error_message`. `UniqueConstraint` also has `violation_error_message` as a parameter in its `__init__`. This suggests that `UniqueConstraint` is handling `violation_error_message` itself, and not relying on `BaseConstraint`'s `__init__` for it.\n\nTherefore, I need to:\n1. Add `self.violation_error_code = violation_error_code` (or `self.default_violation_error_code` if `None`) directly within `UniqueConstraint.__init__`.\n2. Update `UniqueConstraint.__eq__` to include `violation_error_code`.\n3. Update `UniqueConstraint.deconstruct` to include `violation_error_code`.\n4. Modify the `validate` method in `UniqueConstraint` to pass `code=self.violation_error_code` to `ValidationError`.\n\nLet's start by adding the `violation_error_code` assignment in `UniqueConstraint.__init__`. I'll place it after the `violation_error_message` assignment. I need to find the exact line where `violation_error_message` is assigned in `UniqueConstraint`.\n\nI'll read the `UniqueConstraint` class definition again, but this time I'll look for the assignment of `violation_error_message`.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"around\": {\"line\": 173, \"radius\": 50}}}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 448,
+            "prompt_tokens": 11799,
+            "total_tokens": 12247,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 10046,
+              "text_tokens": 1753,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n{\n  \"path\": \"django/db/models/constraints.py\",\n  \"encoding\": \"utf-8\",\n  \"start_line\": 123,\n  \"line_count\": 101,\n  \"truncated\": false,\n  \"content\": \"    def remove_sql(self, model, schema_editor):\\n        return schema_editor._delete_check_sql(model, self.name)\\n\\n    def validate(self, model, instance, exclude=None, using=DEFAULT_DB_ALIAS):\\n        against = instance._get_field_value_map(meta=model._meta, exclude=exclude)\\n        try:\\n            if not Q(self.check).check(against, using=using):\\n                raise ValidationError(\\n                    self.get_violation_error_message(), code=self.violation_error_code\\n                )\\n        except FieldError:\\n            pass\\n\\n    def __repr__(self):\\n        return \\\"<%s: check=%s name=%s%s>\\\" % (\\n            self.__class__.__qualname__,\\n            self.check,\\n            repr(self.name),\\n            (\\n                \\\"\\\"\\n                if self.violation_error_message is None\\n                or self.violation_error_message == self.default_violation_error_message\\n                else \\\" violation_error_message=%r\\\" % self.violation_error_message\\n            ),\\n        )\\n\\n    def __eq__(self, other):\\n        if isinstance(other, CheckConstraint):\\n            return (\\n                self.name == other.name\\n                and self.check == other.check\\n                and self.violation_error_message == other.violation_error_message\\n            )\\n        return super().__eq__(other)\\n\\n    def deconstruct(self):\\n        path, args, kwargs = super().deconstruct()\\n        kwargs[\\\"check\\\"] = self.check\\n        return path, args, kwargs\\n\\n\\nclass Deferrable(Enum):\\n    DEFERRED = \\\"deferred\\\"\\n    IMMEDIATE = \\\"immediate\\\"\\n\\n    # A similar format was proposed for Python 3.10.\\n    def __repr__(self):\\n        return f\\\"{self.__class__.__qualname__}.{self._name_}\\\"\\n\\n\\nclass UniqueConstraint(BaseConstraint):\\n    def __init__(\\n        self,\\n        *expressions,\\n        fields=(),\\n        name=None,\\n        condition=None,\\n        deferrable=None,\\n        include=None,\\n        opclasses=(),\\n        violation_error_message=None,\\n        violation_error_code=None,\\n    ):\\n        if not name:\\n            raise ValueError(\\\"A unique constraint must be named.\\\")\\n        if not expressions and not fields:\\n            raise ValueError(\\n                \\\"At least one field or expression is required to define a \\\"\\n                \\\"unique constraint.\\\"\\n            )\\n        if expressions and fields:\\n            raise ValueError(\\n                \\\"UniqueConstraint.fields and expressions are mutually exclusive.\\\"\\n            )\\n        if not isinstance(condition, (NoneType, Q)):\\n            raise ValueError(\\\"UniqueConstraint.condition must be a Q instance.\\\")\\n        if condition and deferrable:\\n            raise ValueError(\\\"UniqueConstraint with conditions cannot be deferred.\\\")\\n        if include and deferrable:\\n            raise ValueError(\\\"UniqueConstraint with include fields cannot be deferred.\\\")\\n        if opclasses and deferrable:\\n            raise ValueError(\\\"UniqueConstraint with opclasses cannot be deferred.\\\")\\n        if expressions and deferrable:\\n            raise ValueError(\\\"UniqueConstraint with expressions cannot be deferred.\\\")\\n        if expressions and opclasses:\\n            raise ValueError(\\n                \\\"UniqueConstraint.opclasses cannot be used with expressions. \\\"\\n                \\\"Use django.contrib.postgres.indexes.OpClass() instead.\\\"\\n            )\\n        if not isinstance(deferrable, (NoneType, Deferrable)):\\n            raise ValueError(\\n                \\\"UniqueConstraint.deferrable must be a Deferrable instance.\\\"\\n            )\\n        if not isinstance(include, (NoneType, list, tuple)):\\n            raise ValueError(\\\"UniqueConstraint.include must be a list or tuple.\\\")\\n        if not isinstance(opclasses, (list, tuple)):\\n            raise ValueError(\\\"UniqueConstraint.opclasses must be a list or tuple.\\\")\\n        if opclasses and len(fields) != len(opclasses):\\n            raise ValueError(\\n                \\\"UniqueConstraint.fields and UniqueConstraint.opclasses must \\\"\\n                \\\"have the same number of elements.\\\"\\n\"\n}</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I've reviewed the `UniqueConstraint.__init__` method again. It seems `UniqueConstraint` does *not* explicitly set `self.violation_error_message` within its `__init__` method. It relies on the `BaseConstraint`'s `__init__` to handle `name` and `violation_error_message`. My previous assumption was incorrect.\n\nTherefore, I *do* need to call `super().__init__` in `UniqueConstraint` and pass `violation_error_code` to it. I missed the `super().__init__` call because it's not directly visible in the snippet I was looking at. It must be implicitly called or handled differently.\n\nLet me re-examine the `BaseConstraint.__init__` method.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"around\": {\"line\": 20, \"radius\": 20}}}}\n```",
+      "extra": {
+        "response": {
+          "id": "iuI1aYj0D92aqtsP6OKogQs",
+          "created": 1765139080,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I've reviewed the `UniqueConstraint.__init__` method again. It seems `UniqueConstraint` does *not* explicitly set `self.violation_error_message` within its `__init__` method. It relies on the `BaseConstraint`'s `__init__` to handle `name` and `violation_error_message`. My previous assumption was incorrect.\n\nTherefore, I *do* need to call `super().__init__` in `UniqueConstraint` and pass `violation_error_code` to it. I missed the `super().__init__` call because it's not directly visible in the snippet I was looking at. It must be implicitly called or handled differently.\n\nLet me re-examine the `BaseConstraint.__init__` method.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"selector\": {\"around\": {\"line\": 20, \"radius\": 20}}}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 221,
+            "prompt_tokens": 13328,
+            "total_tokens": 13549,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 9056,
+              "text_tokens": 4272,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n{\n  \"path\": \"django/db/models/constraints.py\",\n  \"encoding\": \"utf-8\",\n  \"start_line\": 1,\n  \"line_count\": 40,\n  \"truncated\": false,\n  \"content\": \"import warnings\\nfrom enum import Enum\\nfrom types import NoneType\\n\\nfrom django.core.exceptions import FieldError, ValidationError\\nfrom django.db import connections\\nfrom django.db.models.expressions import Exists, ExpressionList, F, OrderBy\\nfrom django.db.models.indexes import IndexExpression\\nfrom django.db.models.lookups import Exact\\nfrom django.db.models.query_utils import Q\\nfrom django.db.models.sql.query import Query\\nfrom django.db.utils import DEFAULT_DB_ALIAS\\nfrom django.utils.deprecation import RemovedInDjango60Warning\\nfrom django.utils.translation import gettext_lazy as _\\n\\n__all__ = [\\\"BaseConstraint\\\", \\\"CheckConstraint\\\", \\\"Deferrable\\\", \\\"UniqueConstraint\\\"]\\n\\n\\nclass BaseConstraint:\\n    default_violation_error_message = _(\\\"Constraint \\u201c%(name)s\\u201d is violated.\\\")\\n    violation_error_message = None\\n    default_violation_error_code = \\\"unique\\\"\\n    violation_error_code = None\\n\\n    # RemovedInDjango60Warning: When the deprecation ends, replace with:\\n    # def __init__(self, *, name, violation_error_message=None):\\n    def __init__(self, *args, name=None, violation_error_message=None, violation_error_code=None):\\n        # RemovedInDjango60Warning.\\n        if name is None and not args:\\n            raise TypeError(\\n                f\\\"{self.__class__.__name__}.__init__() missing 1 required keyword-only \\\"\\n                f\\\"argument: 'name'\\\"\\n            )\\n        self.name = name\\n        if violation_error_message is not None:\\n            self.violation_error_message = violation_error_message\\n        else:\\n            self.violation_error_message = self.default_violation_error_message\\n        if violation_error_code is not None:\\n            self.violation_error_code = violation_error_code\\n\"\n}</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Okay, I see the `BaseConstraint.__init__` method. My previous changes to `BaseConstraint` are there.\n\nNow, let's go back to `UniqueConstraint`. Since `UniqueConstraint` inherits from `BaseConstraint`, and `BaseConstraint` has an `__init__` method, `UniqueConstraint` *must* call `super().__init__` if it wants to properly initialize the `BaseConstraint` part of itself. If it doesn't, then `self.violation_error_message` and `self.violation_error_code` would not be set by `BaseConstraint`'s `__init__`.\n\nI will add the `super().__init__` call to `UniqueConstraint.__init__`. I'll place it after all the validation checks in `UniqueConstraint.__init__`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"                \\\"UniqueConstraint.fields and UniqueConstraint.opclasses must \\\"\n                \\\"have the same number of elements.\\\"\\n            )\"\"\", \"new_text\": \"\"\"                \\\"UniqueConstraint.fields and UniqueConstraint.opclasses must \\\"\n                \\\"have the same number of elements.\\\"\\n            )\n        super().__init__(\n            name=name,\n            violation_error_message=violation_error_message,\n            violation_error_code=violation_error_code,\n        )\"\"\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "jOI1aZD0L7esmtkPh5-E6QY",
+          "created": 1765139082,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Okay, I see the `BaseConstraint.__init__` method. My previous changes to `BaseConstraint` are there.\n\nNow, let's go back to `UniqueConstraint`. Since `UniqueConstraint` inherits from `BaseConstraint`, and `BaseConstraint` has an `__init__` method, `UniqueConstraint` *must* call `super().__init__` if it wants to properly initialize the `BaseConstraint` part of itself. If it doesn't, then `self.violation_error_message` and `self.violation_error_code` would not be set by `BaseConstraint`'s `__init__`.\n\nI will add the `super().__init__` call to `UniqueConstraint.__init__`. I'll place it after all the validation checks in `UniqueConstraint.__init__`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"                \\\"UniqueConstraint.fields and UniqueConstraint.opclasses must \\\"\n                \\\"have the same number of elements.\\\"\\n            )\"\"\", \"new_text\": \"\"\"                \\\"UniqueConstraint.fields and UniqueConstraint.opclasses must \\\"\n                \\\"have the same number of elements.\\\"\\n            )\n        super().__init__(\n            name=name,\n            violation_error_message=violation_error_message,\n            violation_error_code=violation_error_code,\n        )\"\"\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 324,
+            "prompt_tokens": 14120,
+            "total_tokens": 14444,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 10066,
+              "text_tokens": 4054,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "Invalid tool payload: Expecting ',' delimiter: line 1 column 87 (char 86)"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I apologize for the repeated error. I need to be extremely careful with the `new_text` argument and ensure all newlines are properly escaped within the JSON string. I will correct the `replace` command again.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"                \\\"UniqueConstraint.fields and UniqueConstraint.opclasses must \\\"\\n                \\\"have the same number of elements.\\\"\\n            )\", \"new_text\": \"                \\\"UniqueConstraint.fields and UniqueConstraint.opclasses must \\\"\\n                \\\"have the same number of elements.\\\"\\n            )\\n        super().__init__(\\n            name=name,\\n            violation_error_message=violation_error_message,\\n            violation_error_code=violation_error_code,\\n        )\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "juI1aZeXDPmkqtsPiZzlwAg",
+          "created": 1765139084,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I apologize for the repeated error. I need to be extremely careful with the `new_text` argument and ensure all newlines are properly escaped within the JSON string. I will correct the `replace` command again.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"                \\\"UniqueConstraint.fields and UniqueConstraint.opclasses must \\\"\\n                \\\"have the same number of elements.\\\"\\n            )\", \"new_text\": \"                \\\"UniqueConstraint.fields and UniqueConstraint.opclasses must \\\"\\n                \\\"have the same number of elements.\\\"\\n            )\\n        super().__init__(\\n            name=name,\\n            violation_error_message=violation_error_message,\\n            violation_error_code=violation_error_code,\\n        )\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 195,
+            "prompt_tokens": 14468,
+            "total_tokens": 14663,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 11071,
+              "text_tokens": 3397,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now that `UniqueConstraint.__init__` is calling `super().__init__` with `violation_error_code`, I need to update `UniqueConstraint.__eq__` to include `violation_error_code` in the comparison.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"                and self.violation_error_message == other.violation_error_message\"\"\", \"new_text\": \"\"\"                and self.violation_error_message == other.violation_error_message\n                and self.violation_error_code == other.violation_error_code\"\"\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "keI1aamvFOmymtkPwrvG4AY",
+          "created": 1765139087,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now that `UniqueConstraint.__init__` is calling `super().__init__` with `violation_error_code`, I need to update `UniqueConstraint.__eq__` to include `violation_error_code` in the comparison.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"                and self.violation_error_message == other.violation_error_message\"\"\", \"new_text\": \"\"\"                and self.violation_error_message == other.violation_error_message\n                and self.violation_error_code == other.violation_error_code\"\"\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 156,
+            "prompt_tokens": 14700,
+            "total_tokens": 14856,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 13081,
+              "text_tokens": 1619,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "Invalid tool payload: Expecting ',' delimiter: line 1 column 87 (char 86)"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: My apologies again for the persistent error with newlines. I will correct the `replace` command for `UniqueConstraint.__eq__`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"                and self.violation_error_message == other.violation_error_message\", \"new_text\": \"                and self.violation_error_message == other.violation_error_message\\n                and self.violation_error_code == other.violation_error_code\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "kuI1aZWXJOilqtsPpo7PgQs",
+          "created": 1765139089,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: My apologies again for the persistent error with newlines. I will correct the `replace` command for `UniqueConstraint.__eq__`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"                and self.violation_error_message == other.violation_error_message\", \"new_text\": \"                and self.violation_error_message == other.violation_error_message\\n                and self.violation_error_code == other.violation_error_code\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 132,
+            "prompt_tokens": 14880,
+            "total_tokens": 15012,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 14083,
+              "text_tokens": 797,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 2 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: It seems the previous `replace` command replaced two occurrences. This is fine as long as both were intended. Now I need to update `UniqueConstraint.deconstruct` to include `violation_error_code` in the `kwargs` if it's not the default.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"            \"\" if not self.opclasses else \" opclasses=%s\" % repr(self.opclasses),\n            (\n                \"\"\n                if self.violation_error_message is None\n                or self.violation_error_message == self.default_violation_error_message\n                else \" violation_error_message=%r\" % self.violation_error_message\n            ),\"\"\", \"new_text\": \"\"\"            \"\" if not self.opclasses else \" opclasses=%s\" % repr(self.opclasses),\n            (\n                \"\"\n                if self.violation_error_message is None\n                or self.violation_error_message == self.default_violation_error_message\n                else \" violation_error_message=%r\" % self.violation_error_message\n            ),\n            (\n                \"\"\n                if self.violation_error_code is None\n                or self.violation_error_code == self.default_violation_error_code\n                else \" violation_error_code=%r\" % self.violation_error_code\n            ),\"\"\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "leI1aYmMI42yqtsP9Nj3sAY",
+          "created": 1765139091,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: It seems the previous `replace` command replaced two occurrences. This is fine as long as both were intended. Now I need to update `UniqueConstraint.deconstruct` to include `violation_error_code` in the `kwargs` if it's not the default.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"\"\"            \"\" if not self.opclasses else \" opclasses=%s\" % repr(self.opclasses),\n            (\n                \"\"\n                if self.violation_error_message is None\n                or self.violation_error_message == self.default_violation_error_message\n                else \" violation_error_message=%r\" % self.violation_error_message\n            ),\"\"\", \"new_text\": \"\"\"            \"\" if not self.opclasses else \" opclasses=%s\" % repr(self.opclasses),\n            (\n                \"\"\n                if self.violation_error_message is None\n                or self.violation_error_message == self.default_violation_error_message\n                else \" violation_error_message=%r\" % self.violation_error_message\n            ),\n            (\n                \"\"\n                if self.violation_error_code is None\n                or self.violation_error_code == self.default_violation_error_code\n                else \" violation_error_code=%r\" % self.violation_error_code\n            ),\"\"\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 345,
+            "prompt_tokens": 15049,
+            "total_tokens": 15394,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 14078,
+              "text_tokens": 971,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "Invalid tool payload: Expecting ',' delimiter: line 1 column 87 (char 86)"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I apologize for the repeated error. I will correct the `replace` command for `UniqueConstraint.deconstruct`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"            \\\"\\\" if not self.opclasses else \\\" opclasses=%s\\\" % repr(self.opclasses),\\n            (\\n                \\\"\\\"\\n                if self.violation_error_message is None\\n                or self.violation_error_message == self.default_violation_error_message\\n                else \\\" violation_error_message=%r\\\" % self.violation_error_message\\n            ),\", \"new_text\": \"            \\\"\\\" if not self.opclasses else \\\" opclasses=%s\\\" % repr(self.opclasses),\\n            (\\n                \\\"\\\"\\n                if self.violation_error_message is None\\n                or self.violation_error_message == self.default_violation_error_message\\n                else \\\" violation_error_message=%r\\\" % self.violation_error_message\\n            ),\\n            (\\n                \\\"\\\"\\n                if self.violation_error_code is None\\n                or self.violation_error_code == self.default_violation_error_code\\n                else \\\" violation_error_code=%r\\\" % self.violation_error_code\\n            ),\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "mOI1aaPPItmNmtkPyL282Ag",
+          "created": 1765139093,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I apologize for the repeated error. I will correct the `replace` command for `UniqueConstraint.deconstruct`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"            \\\"\\\" if not self.opclasses else \\\" opclasses=%s\\\" % repr(self.opclasses),\\n            (\\n                \\\"\\\"\\n                if self.violation_error_message is None\\n                or self.violation_error_message == self.default_violation_error_message\\n                else \\\" violation_error_message=%r\\\" % self.violation_error_message\\n            ),\", \"new_text\": \"            \\\"\\\" if not self.opclasses else \\\" opclasses=%s\\\" % repr(self.opclasses),\\n            (\\n                \\\"\\\"\\n                if self.violation_error_message is None\\n                or self.violation_error_message == self.default_violation_error_message\\n                else \\\" violation_error_message=%r\\\" % self.violation_error_message\\n            ),\\n            (\\n                \\\"\\\"\\n                if self.violation_error_code is None\\n                or self.violation_error_code == self.default_violation_error_code\\n                else \\\" violation_error_code=%r\\\" % self.violation_error_code\\n            ),\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 324,
+            "prompt_tokens": 15418,
+            "total_tokens": 15742,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 14077,
+              "text_tokens": 1341,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now I need to modify the `validate` method in `UniqueConstraint` to pass the `violation_error_code` to `ValidationError`. There are two places where `ValidationError` is raised.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"                    raise ValidationError(self.get_violation_error_message())\", \"new_text\": \"                    raise ValidationError(\\n                        self.get_violation_error_message(),\\n                        code=self.violation_error_code,\\n                    )\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "muI1afWCLPrBqtsP1tHV-Qo",
+          "created": 1765139097,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now I need to modify the `validate` method in `UniqueConstraint` to pass the `violation_error_code` to `ValidationError`. There are two places where `ValidationError` is raised.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"old_text\": \"                    raise ValidationError(self.get_violation_error_message())\", \"new_text\": \"                    raise ValidationError(\\n                        self.get_violation_error_message(),\\n                        code=self.violation_error_code,\\n                    )\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 136,
+            "prompt_tokens": 15779,
+            "total_tokens": 15915,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 10054,
+              "text_tokens": 5725,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nNo replacements made (text not found)</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: It seems the `old_text` for the `ValidationError` in `UniqueConstraint.validate` didn't match exactly. I need to get the exact lines where `ValidationError` is raised in `UniqueConstraint.validate`.\n\nI'll use `search_file_content` to find \"ValidationError\" within the `UniqueConstraint` class.\n\n```tool\n{\"name\": \"search_file_content\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"pattern\": \"ValidationError\", \"context_lines\": 5}}\n```",
+      "extra": {
+        "response": {
+          "id": "nOI1aau-JOzMqtsPtuy08AY",
+          "created": 1765139099,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: It seems the `old_text` for the `ValidationError` in `UniqueConstraint.validate` didn't match exactly. I need to get the exact lines where `ValidationError` is raised in `UniqueConstraint.validate`.\n\nI'll use `search_file_content` to find \"ValidationError\" within the `UniqueConstraint` class.\n\n```tool\n{\"name\": \"search_file_content\", \"args\": {\"path\": \"django/db/models/constraints.py\", \"pattern\": \"ValidationError\", \"context_lines\": 5}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 121,
+            "prompt_tokens": 15941,
+            "total_tokens": 16062,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 15077,
+              "text_tokens": 864,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>1</returncode>\n<output>\nPath must be within /testbed directory, got: django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: My apologies, I forgot the `/testbed/` prefix. I will correct the path and try again.\n\n```tool\n{\"name\": \"search_file_content\", \"args\": {\"path\": \"/testbed/django/db/models/constraints.py\", \"pattern\": \"ValidationError\", \"context_lines\": 5}}\n```",
+      "extra": {
+        "response": {
+          "id": "neI1aca9Ob2kqtsPt8vVoQs",
+          "created": 1765139100,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: My apologies, I forgot the `/testbed/` prefix. I will correct the path and try again.\n\n```tool\n{\"name\": \"search_file_content\", \"args\": {\"path\": \"/testbed/django/db/models/constraints.py\", \"pattern\": \"ValidationError\", \"context_lines\": 5}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 75,
+            "prompt_tokens": 16101,
+            "total_tokens": 16176,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 15072,
+              "text_tokens": 1029,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nFound 48 match(es) for 'ValidationError':\n1-import warnings\n2-from enum import Enum\n3-from types import NoneType\n4-\n5:from django.core.exceptions import FieldError, ValidationError\n6-from django.db import connections\n7-from django.db.models.expressions import Exists, ExpressionList, F, OrderBy\n8-from django.db.models.indexes import IndexExpression\n9-from django.db.models.lookups import Exact\n10-from django.db.models.query_utils import Q\n--\n125-\n126-    def validate(self, model, instance, exclude=None, using=DEFAULT_DB_ALIAS):\n127-        against = instance._get_field_value_map(meta=model._meta, exclude=exclude)\n128-        try:\n129-            if not Q(self.check).check(against, using=using):\n130:                raise ValidationError(\n131-                    self.get_violation_error_message(), code=self.violation_error_code\n132-                )\n133-        except FieldError:\n134-            pass\n135-\n--\n418-        if not instance._state.adding and model_class_pk is not None:\n419-            queryset = queryset.exclude(pk=model_class_pk)\n420-        if not self.condition:\n421-            if queryset.exists():\n422-                if self.expressions:\n423:                    raise ValidationError(\n424-                    self.get_violation_error_message(), code=self.violation_error_code\n425-                )\n426-                # When fields are defined, use the unique_error_message() for\n427-                # backward compatibility.\n428-                for model, constraints in instance.get_constraints():\n429-                    for constraint in constraints:\n430-                        if constraint is self:\n431:                            raise ValidationError(\n432-                                instance.unique_error_message(model, self.fields)\n433-                            )\n434-        else:\n435-            against = instance._get_field_value_map(meta=model._meta, exclude=exclude)\n436-            try:\n437-                if (self.condition & Exists(queryset.filter(self.condition))).check(\n438-                    against, using=using\n439-                ):\n440:                    raise ValidationError(\n441-                    self.get_violation_error_message(), code=self.violation_error_code\n442-                )\n443-            except FieldError:\n444-                pass\n</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Okay, I see the `ValidationError` occurrences. It seems I already modified the `CheckConstraint.validate` (lines 130-132) and two of the `UniqueConstraint.validate` (lines 423-425 and 440-442).\n\nHowever, there's one more `ValidationError` in `UniqueConstraint.validate` (lines 431-433) that needs to be updated. This one is different because it calls `instance.unique_error_message`. I need to add the `code` parameter to this `ValidationError` as well.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"/testbed/django/db/models/constraints.py\", \"old_text\": \"\"\"                            raise ValidationError(\n                                instance.unique_error_message(model, self.fields)\n                            )\"\"\", \"new_text\": \"\"\"                            raise ValidationError(\n                                instance.unique_error_message(model, self.fields),\n                                code=self.violation_error_code,\n                            )\"\"\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "oOI1aeiMBMCzmtkPlIimwQY",
+          "created": 1765139102,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Okay, I see the `ValidationError` occurrences. It seems I already modified the `CheckConstraint.validate` (lines 130-132) and two of the `UniqueConstraint.validate` (lines 423-425 and 440-442).\n\nHowever, there's one more `ValidationError` in `UniqueConstraint.validate` (lines 431-433) that needs to be updated. This one is different because it calls `instance.unique_error_message`. I need to add the `code` parameter to this `ValidationError` as well.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"/testbed/django/db/models/constraints.py\", \"old_text\": \"\"\"                            raise ValidationError(\n                                instance.unique_error_message(model, self.fields)\n                            )\"\"\", \"new_text\": \"\"\"                            raise ValidationError(\n                                instance.unique_error_message(model, self.fields),\n                                code=self.violation_error_code,\n                            )\"\"\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 240,
+            "prompt_tokens": 16852,
+            "total_tokens": 17092,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 14072,
+              "text_tokens": 2780,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "Invalid tool payload: Expecting ',' delimiter: line 1 column 96 (char 95)"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I apologize for the persistent error with newlines. I will correct the `replace` command for the last `ValidationError` in `UniqueConstraint.validate`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"/testbed/django/db/models/constraints.py\", \"old_text\": \"                            raise ValidationError(\\n                                instance.unique_error_message(model, self.fields)\\n                            )\", \"new_text\": \"                            raise ValidationError(\\n                                instance.unique_error_message(model, self.fields),\\n                                code=self.violation_error_code,\\n                            )\"}}\n```",
+      "extra": {
+        "response": {
+          "id": "oeI1ab7ZE_almtkPnarZ-Ao",
+          "created": 1765139104,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I apologize for the persistent error with newlines. I will correct the `replace` command for the last `ValidationError` in `UniqueConstraint.validate`.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"/testbed/django/db/models/constraints.py\", \"old_text\": \"                            raise ValidationError(\\n                                instance.unique_error_message(model, self.fields)\\n                            )\", \"new_text\": \"                            raise ValidationError(\\n                                instance.unique_error_message(model, self.fields),\\n                                code=self.violation_error_code,\\n                            )\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 138,
+            "prompt_tokens": 17116,
+            "total_tokens": 17254,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 16080,
+              "text_tokens": 1036,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in /testbed/django/db/models/constraints.py</output>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I believe all necessary changes have been made to `django/db/models/constraints.py`. I have:\n1. Added `default_violation_error_code` and `violation_error_code` to `BaseConstraint`.\n2. Modified `BaseConstraint.__init__` to accept and set `violation_error_code`.\n3. Modified `BaseConstraint.deconstruct` to include `violation_error_code`.\n4. Modified `CheckConstraint.__init__` to accept `violation_error_code` and pass it to `super().__init__`.\n5. Modified `CheckConstraint.validate` to pass `code=self.violation_error_code` to `ValidationError`.\n6. Modified `UniqueConstraint.__init__` to accept `violation_error_code` and pass it to `super().__init__`.\n7. Modified `UniqueConstraint.__eq__` to include `violation_error_code`.\n8. Modified `UniqueConstraint.deconstruct` to include `violation_error_code`.\n9. Modified `UniqueConstraint.validate` to pass `code=self.violation_error_code` to `ValidationError` in all relevant places.\n\nI'm confident that the changes address the PR description. I will now submit my work.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+      "extra": {
+        "response": {
+          "id": "pOI1aZKbKO3EqtsPpMW7sAY",
+          "created": 1765139106,
+          "model": "gemini-2.5-flash",
+          "object": "chat.completion",
+          "system_fingerprint": null,
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I believe all necessary changes have been made to `django/db/models/constraints.py`. I have:\n1. Added `default_violation_error_code` and `violation_error_code` to `BaseConstraint`.\n2. Modified `BaseConstraint.__init__` to accept and set `violation_error_code`.\n3. Modified `BaseConstraint.deconstruct` to include `violation_error_code`.\n4. Modified `CheckConstraint.__init__` to accept `violation_error_code` and pass it to `super().__init__`.\n5. Modified `CheckConstraint.validate` to pass `code=self.violation_error_code` to `ValidationError`.\n6. Modified `UniqueConstraint.__init__` to accept `violation_error_code` and pass it to `super().__init__`.\n7. Modified `UniqueConstraint.__eq__` to include `violation_error_code`.\n8. Modified `UniqueConstraint.deconstruct` to include `violation_error_code`.\n9. Modified `UniqueConstraint.validate` to pass `code=self.violation_error_code` to `ValidationError` in all relevant places.\n\nI'm confident that the changes address the PR description. I will now submit my work.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null,
+                "images": [],
+                "thinking_blocks": [],
+                "provider_specific_fields": null
+              }
+            }
+          ],
+          "usage": {
+            "completion_tokens": 312,
+            "prompt_tokens": 17295,
+            "total_tokens": 17607,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 17081,
+              "text_tokens": 214,
+              "image_tokens": null
+            }
+          },
+          "vertex_ai_grounding_metadata": [],
+          "vertex_ai_url_context_metadata": [],
+          "vertex_ai_safety_results": [],
+          "vertex_ai_citation_metadata": []
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "diff --git a/django/db/models/constraints.py b/django/db/models/constraints.py\nindex 075ecee1be..f05bc74554 100644\n--- a/django/db/models/constraints.py\n+++ b/django/db/models/constraints.py\n@@ -19,10 +19,12 @@ __all__ = [\"BaseConstraint\", \"CheckConstraint\", \"Deferrable\", \"UniqueConstraint\"\n class BaseConstraint:\n     default_violation_error_message = _(\"Constraint \u201c%(name)s\u201d is violated.\")\n     violation_error_message = None\n+    default_violation_error_code = \"unique\"\n+    violation_error_code = None\n \n     # RemovedInDjango60Warning: When the deprecation ends, replace with:\n     # def __init__(self, *, name, violation_error_message=None):\n-    def __init__(self, *args, name=None, violation_error_message=None):\n+    def __init__(self, *args, name=None, violation_error_message=None, violation_error_code=None):\n         # RemovedInDjango60Warning.\n         if name is None and not args:\n             raise TypeError(\n@@ -34,6 +36,10 @@ class BaseConstraint:\n             self.violation_error_message = violation_error_message\n         else:\n             self.violation_error_message = self.default_violation_error_message\n+        if violation_error_code is not None:\n+            self.violation_error_code = violation_error_code\n+        else:\n+            self.violation_error_code = self.default_violation_error_code\n         # RemovedInDjango60Warning.\n         if args:\n             warnings.warn(\n@@ -74,6 +80,11 @@ class BaseConstraint:\n             and self.violation_error_message != self.default_violation_error_message\n         ):\n             kwargs[\"violation_error_message\"] = self.violation_error_message\n+        if (\n+            self.violation_error_code is not None\n+            and self.violation_error_code != self.default_violation_error_code\n+        ):\n+            kwargs[\"violation_error_code\"] = self.violation_error_code\n         return (path, (), kwargs)\n \n     def clone(self):\n@@ -82,13 +93,17 @@ class BaseConstraint:\n \n \n class CheckConstraint(BaseConstraint):\n-    def __init__(self, *, check, name, violation_error_message=None):\n+    def __init__(self, *, check, name, violation_error_message=None, violation_error_code=None):\n         self.check = check\n         if not getattr(check, \"conditional\", False):\n             raise TypeError(\n                 \"CheckConstraint.check must be a Q instance or boolean expression.\"\n             )\n-        super().__init__(name=name, violation_error_message=violation_error_message)\n+        super().__init__(\n+            name=name,\n+            violation_error_message=violation_error_message,\n+            violation_error_code=violation_error_code,\n+        )\n \n     def _get_check_sql(self, model, schema_editor):\n         query = Query(model=model, alias_cols=False)\n@@ -112,7 +127,9 @@ class CheckConstraint(BaseConstraint):\n         against = instance._get_field_value_map(meta=model._meta, exclude=exclude)\n         try:\n             if not Q(self.check).check(against, using=using):\n-                raise ValidationError(self.get_violation_error_message())\n+                raise ValidationError(\n+                    self.get_violation_error_message(), code=self.violation_error_code\n+                )\n         except FieldError:\n             pass\n \n@@ -135,6 +152,7 @@ class CheckConstraint(BaseConstraint):\n                 self.name == other.name\n                 and self.check == other.check\n                 and self.violation_error_message == other.violation_error_message\n+                and self.violation_error_code == other.violation_error_code\n             )\n         return super().__eq__(other)\n \n@@ -164,6 +182,7 @@ class UniqueConstraint(BaseConstraint):\n         include=None,\n         opclasses=(),\n         violation_error_message=None,\n+        violation_error_code=None,\n     ):\n         if not name:\n             raise ValueError(\"A unique constraint must be named.\")\n@@ -204,6 +223,11 @@ class UniqueConstraint(BaseConstraint):\n                 \"UniqueConstraint.fields and UniqueConstraint.opclasses must \"\n                 \"have the same number of elements.\"\n             )\n+        super().__init__(\n+            name=name,\n+            violation_error_message=violation_error_message,\n+            violation_error_code=violation_error_code,\n+        )\n         self.fields = tuple(fields)\n         self.condition = condition\n         self.deferrable = deferrable\n@@ -213,7 +237,11 @@ class UniqueConstraint(BaseConstraint):\n             F(expression) if isinstance(expression, str) else expression\n             for expression in expressions\n         )\n-        super().__init__(name=name, violation_error_message=violation_error_message)\n+        super().__init__(\n+            name=name,\n+            violation_error_message=violation_error_message,\n+            violation_error_code=violation_error_code,\n+        )\n \n     @property\n     def contains_expressions(self):\n@@ -308,6 +336,12 @@ class UniqueConstraint(BaseConstraint):\n                 or self.violation_error_message == self.default_violation_error_message\n                 else \" violation_error_message=%r\" % self.violation_error_message\n             ),\n+            (\n+                \"\"\n+                if self.violation_error_code is None\n+                or self.violation_error_code == self.default_violation_error_code\n+                else \" violation_error_code=%r\" % self.violation_error_code\n+            ),\n         )\n \n     def __eq__(self, other):\n@@ -321,6 +355,7 @@ class UniqueConstraint(BaseConstraint):\n                 and self.opclasses == other.opclasses\n                 and self.expressions == other.expressions\n                 and self.violation_error_message == other.violation_error_message\n+                and self.violation_error_code == other.violation_error_code\n             )\n         return super().__eq__(other)\n \n@@ -385,14 +420,17 @@ class UniqueConstraint(BaseConstraint):\n         if not self.condition:\n             if queryset.exists():\n                 if self.expressions:\n-                    raise ValidationError(self.get_violation_error_message())\n+                    raise ValidationError(\n+                    self.get_violation_error_message(), code=self.violation_error_code\n+                )\n                 # When fields are defined, use the unique_error_message() for\n                 # backward compatibility.\n                 for model, constraints in instance.get_constraints():\n                     for constraint in constraints:\n                         if constraint is self:\n                             raise ValidationError(\n-                                instance.unique_error_message(model, self.fields)\n+                                instance.unique_error_message(model, self.fields),\n+                                code=self.violation_error_code,\n                             )\n         else:\n             against = instance._get_field_value_map(meta=model._meta, exclude=exclude)\n@@ -400,6 +438,8 @@ class UniqueConstraint(BaseConstraint):\n                 if (self.condition & Exists(queryset.filter(self.condition))).check(\n                     against, using=using\n                 ):\n-                    raise ValidationError(self.get_violation_error_message())\n+                    raise ValidationError(\n+                    self.get_violation_error_message(), code=self.violation_error_code\n+                )\n             except FieldError:\n                 pass\n"
+    }
+  ],
+  "trajectory_format": "mini-swe-agent-1",
+  "instance_id": "django__django-16560"
+}
