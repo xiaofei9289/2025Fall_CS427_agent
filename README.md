@@ -1,20 +1,20 @@
 # CS427-agent
 
-2025 Fall CS427 个人项目，作者 [xiaofei9289](https://github.com/xiaofei9289)。
+Personal project for CS427, Fall 2025, by [xiaofei9289](https://github.com/xiaofei9289).
 
-本仓库在 [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) 上扩展了工具调用和记忆能力，并保留了课程实验的中期、期末交付物。上游代码的版权归原作者所有，见 `LICENSE.md`。
+This repository extends [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) with tool calling and memory, and keeps the midterm and final course deliverables. Copyright for the upstream code remains with the original authors. See `LICENSE.md`.
 
-## 项目内容
+## Contents
 
-- `src/minisweagent/`：agent、环境、模型，以及课程扩展的工具和记忆模块
-- 工具：`read_file`、`write_file`、`refined_read_file`、`read_many_files`、`search_file_content`、`replace`、`find_definition`、`todo`
-- 记忆：`HistoryManager`、`SessionMemory`、`TrajectoryReplayer`
-- `deliverables_midterm/`、`deliverables_final/`：SWE-bench 运行结果与报告
-- `tests/`：工具、记忆和运行流程测试
+- `src/minisweagent/`: the agent, environments, models, and the course extensions for tools and memory
+- Tools: `read_file`, `write_file`, `refined_read_file`, `read_many_files`, `search_file_content`, `replace`, `find_definition`, `todo`
+- Memory: `HistoryManager`, `SessionMemory`, `TrajectoryReplayer`
+- `deliverables_midterm/`, `deliverables_final/`: SWE-bench run results and reports
+- `tests/`: tests for tools, memory, and the run flow
 
-## 安装
+## Installation
 
-需要 Python 3.10 及以上。
+Python 3.10 or newer is required.
 
 ```bash
 git clone https://github.com/xiaofei9289/2025Fall_CS427_agent.git
@@ -22,25 +22,25 @@ cd 2025Fall_CS427_agent
 pip install -e .
 ```
 
-开发依赖：
+Development dependencies:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-## 运行
+## Run
 
 ```bash
 mini
 ```
 
-带界面：
+With the visual interface:
 
 ```bash
 mini -v
 ```
 
-在 Python 里调用：
+From Python:
 
 ```python
 from minisweagent.agents.default import DefaultAgent
@@ -54,18 +54,18 @@ agent = DefaultAgent(
 agent.run("Write a sudoku game")
 ```
 
-## 测试
+## Tests
 
 ```bash
 pytest
 ```
 
-## 说明文档
+## Documentation
 
-- 工具扩展：`cs427_tools_extension.md`
-- 记忆扩展：`cs427_memory.md`
-- 上游文档：<https://mini-swe-agent.com/latest/>
+- Tool extension: `cs427_tools_extension.md`
+- Memory extension: `cs427_memory.md`
+- Upstream docs: <https://mini-swe-agent.com/latest/>
 
-## 致谢
+## Acknowledgments
 
-本项目基于 Princeton 与 Stanford 团队的 [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) 与 [SWE-agent](https://github.com/SWE-agent/SWE-agent)。如果这项工作对你有帮助，请引用 [SWE-agent 论文](https://arxiv.org/abs/2405.15793)。
+This project is based on [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) and [SWE-agent](https://github.com/SWE-agent/SWE-agent) from the Princeton and Stanford teams. If you find this work helpful, please cite the [SWE-agent paper](https://arxiv.org/abs/2405.15793).
