@@ -80,6 +80,10 @@ def main() -> None:
         raise SystemExit(f"{frozen} is missing; run generation first.")
     if source_digest(frozen) != digest:
         raise SystemExit(f"Frozen digest differs from the desktop repo {digest[:16]}; use a new study directory.")
+    # Mountpoints must exist under the read-only frozen mount before Docker can
+    # bind the study and SWE-bench directories on top of them.
+    (frozen / "SWE-bench").mkdir(exist_ok=True)
+    (frozen / "experiments" / STUDY_NAME).mkdir(parents=True, exist_ok=True)
 
     docker_env = os.environ | {"DOCKER_HOST": "npipe:////./pipe/dockerDesktopLinuxEngine"}
     docker_config = root / "desktop_validation" / "docker-config"
