@@ -35,6 +35,10 @@ def main() -> None:
     for name in ("pyproject.toml", "README.md", "LICENSE.md", "uv.lock"):
         if (code / name).is_file():
             shutil.copy2(code / name, frozen / name)
+    # Docker cannot create nested mountpoints inside the readonly /workspace
+    # bind, so pre-create them in the frozen copy.
+    (frozen / "SWE-bench").mkdir()
+    (frozen / "experiments" / study.name).mkdir(parents=True)
     print(f"Frozen source copy: {frozen}", flush=True)
     env = os.environ | {"DOCKER_HOST": "npipe:////./pipe/dockerDesktopLinuxEngine",
                         "DOCKER_CONFIG": str(root / "desktop_validation" / "docker-config")}
