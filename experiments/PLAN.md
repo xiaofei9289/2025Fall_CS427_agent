@@ -127,11 +127,16 @@ manifest `source.sha256` 不一致被守卫判无效；归一化行尾后唯一�
 50 题扩量配置已预置于 `experiments/memory_scale50_20261018`，仅在五题对照显示开启组通过数
 严格高于关闭组后单次运行，报告同时给出全 50 题与剔除前 5 题调参任务的结果。
 
-三个 TokenFy 单渠道模型（`claude-opus-5`、`gpt-5.6-sol`、`gemini-3.8-flash`）的五题流程验证位于
-`experiments/pilot_tokenfy_20261018`：完整重跑（`_r2`）与官方评分零 harness 错误，gpt-5.6-sol
-4/5、claude 与 gemini 各 1/5；claude 五题全部撞满 $1 单题硬预算、gemini 多题因思考消耗未留下
-改动，整组对照前需重新设计预算；首轮因 key 余额耗尽部分失败，产物原样保留。三组渠道与预算
-约束不同，不能据此比较模型能力。
+四个渠道模型的五题流程验证位于 `experiments/pilot_tokenfy_20261018`（TokenFy 的
+`claude-opus-5`、`gpt-5.6-sol`、`gemini-3.8-flash` 与官方 `deepseek-chat`）：完整重跑
+（`_r2`）与官方评分零 harness 错误，gpt-5.6-sol 4/5、deepseek 3/5（与历史基线任务级
+一致）、claude/gemini 各 1/5（$1/题）。Claude $3/题组（`claude_opus_5_3usd`，`_r3`+`_r5`）
+为 3/5，11333/15315 在预算放宽后通过；matplotlib-20826 在 DeepSeek（$0.01）与 Claude
+（$4.1）上同样是"探索耗尽 300 秒无改动"，时间上限与探索策略是该题瓶颈，恰为 retrieval
+工具实验的靶子；`_r4` 因 `--tasks` 实现缺陷误跑全 5 题并强杀止损（$6.22，留档不计对照）。
+15315 的"两次调用空提交"失败链（模拟式爆写 + 格式错误反馈谎报 found 0 actions + 幻觉
+完成即提交）已定位，`default.py` 计数反馈已修复并补回归测试。各组渠道与预算约束不同，
+不能据此比较模型能力。
 
 1. 五题查找对照和离线定位已完成。文件级 Hit@5 为 4/5；Matplotlib 的官方文件排第 54，见 `experiments/localization_verified5`。
 2. 用相同预算扩到固定任务集之前，先解释邮件题在主文件已命中时仍失败的原因。
