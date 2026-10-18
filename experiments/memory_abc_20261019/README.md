@@ -30,6 +30,10 @@ The desktop launcher freezes `src`, verifies its digest, and runs inside the exi
 # pilot: first 10 tasks, all three arms, then grading and report
 python experiments/memory_abc_20261019/desktop.py all --arm all --pilot --workers 2
 
+# focused rerun of failed tasks (new tag; keeps the original round)
+python experiments/memory_abc_20261019/desktop.py generation --arm c --pilot \
+  --round p2g --tasks experiments/memory_abc_20261019/tasks_retry_p2f.json --workers 1
+
 # formal: 50 tasks, one round at a time
 python experiments/memory_abc_20261019/desktop.py all --arm all --round r1 --workers 2
 python experiments/memory_abc_20261019/desktop.py all --arm all --round r2 --workers 2

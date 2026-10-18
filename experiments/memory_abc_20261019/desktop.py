@@ -56,6 +56,8 @@ def main() -> None:
     parser.add_argument("--a-tag", default=None)
     parser.add_argument("--b-tag", default=None)
     parser.add_argument("--c-tag", default=None)
+    parser.add_argument("--tasks", default=None, help="task-list JSON for a focused rerun")
+    parser.add_argument("--redo", action="store_true", help="overwrite an existing tag")
     args = parser.parse_args()
     if platform.system() != "Windows":
         raise SystemExit("Run this launcher on the Windows desktop.")
@@ -165,6 +167,10 @@ def main() -> None:
             command += [flag, value]
     if args.arms:
         command += ["--arms", args.arms]
+    if args.tasks:
+        command += ["--tasks", args.tasks]
+    if args.redo:
+        command.append("--redo")
     print("Running in the desktop Linux engine", flush=True)
     subprocess.run(command, cwd=root, env=env, check=True)
 
