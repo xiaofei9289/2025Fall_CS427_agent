@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-BASELINE = Path(__file__).resolve().parent.parent / "deepseek_scale50_20261018" / "baseline"
+BASELINE = Path(__file__).resolve().parent.parent / "deepseek_scale50_20261018" / "baseline_r2"
 
 
 def report(study: Path) -> None:
@@ -27,7 +27,7 @@ def report(study: Path) -> None:
     for manifest in controls.values():
         manifest["config"]["agent"].pop("enable_memory")
         manifest["config"]["agent"].pop("memory_max_messages", None)
-    for field in ("config", "instance_ids", "tasks", "workers", "source", "python", "dependencies"):
+    for field in ("config", "instance_ids", "tasks", "source", "python", "dependencies"):
         if controls["baseline"][field] != controls["on"][field]:
             raise ValueError(f"Experiment controls differ: {field}")
 
@@ -35,7 +35,8 @@ def report(study: Path) -> None:
               "treatment": "history compression only; memory_search disabled in both arms",
               "source": manifests["baseline"]["source"], "arms": {}}
     lines = ["# DeepSeek 50-task memory comparison", "",
-             "Same model, tools, source, task order, budgets and workers; only enable_memory (40-message budget) differs.", "",
+             "Same model, tools, source, task order and budgets; only enable_memory (40-message budget) differs.",
+             f"Workers: baseline {manifests['baseline']['workers']}, on {manifests['on']['workers']}.", "",
              "| Arm | Resolved | Empty patches | Evaluation errors | API calls | Cost (USD) |",
              "| --- | ---: | ---: | ---: | ---: | ---: |"]
     for arm, path in paths.items():

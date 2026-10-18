@@ -26,6 +26,11 @@
 python experiments/memory_scale50_20261018/desktop.py all
 ```
 
+启动器与 `memory_fix5_20261018` 相同的冻结纪律：`generation` 前把修复源码快照
+冻结成一次性副本（`desktop_validation/frozen-memory_scale50_20261018`，已存在即拒绝），
+容器挂载冻结副本而非共享快照的实时视图，避免宿主中途改动作废 manifest 指纹
+（fix4 的失效模式）；单独执行 `grading` 校验并复用该冻结副本，评分可按阶段恢复。
+
 凭据与镜像要求与 `memory_fix_20261018` 相同：`cs427-validation:local` 镜像就绪，
 TokenFY 密钥从台式机环境读取，不写入配置或日志。生成与评分各留日志和
 `*_execution.json`；两组的预测、轨迹、源码快照和官方结果分别位于 `off/`、`on/`，

@@ -3,6 +3,7 @@
 import argparse
 import os
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -24,6 +25,24 @@ def main() -> None:
     default_py = code / "src" / "minisweagent" / "agents" / "default.py"
     if default_py.read_text().count("Your task: {{task}}") != 1:
         raise SystemExit("The source snapshot is stale; refresh desktop_validation/memory-fix-20261018 first.")
+    # Freeze a one-shot copy like memory_fix5_20261018: a bind mount is a live view,
+    # so mounting the shared snapshot directly lets host edits change the code mid-run
+    # (this voided fix4). Grading alone must reuse the frozen copy generation ran with.
+    frozen = root / "desktop_validation" / f"frozen-{study.name}"
+    phases = ("generation", "grading") if args.phase == "all" else (args.phase,)
+    if "generation" in phases:
+        if frozen.exists():
+            raise SystemExit(f"{frozen} already exists; delete it before starting a new run.")
+        frozen.mkdir(parents=True)
+        shutil.copytree(code / "src", frozen / "src")
+        for name in ("pyproject.toml", "README.md", "LICENSE.md", "uv.lock"):
+            if (code / name).is_file():
+                shutil.copy2(code / name, frozen / name)
+        (frozen / "SWE-bench").mkdir()
+        (frozen / "experiments" / study.name).mkdir(parents=True)
+        print(f"Frozen source copy: {frozen}", flush=True)
+    elif not frozen.exists():
+        raise SystemExit(f"{frozen} is missing; run generation before grading.")
     env = os.environ | {"DOCKER_HOST": "npipe:////./pipe/dockerDesktopLinuxEngine",
                         "DOCKER_CONFIG": str(root / "desktop_validation" / "docker-config")}
     subprocess.run(["docker", "info", "--format", "{{.OSType}}"], env=env, check=True)
@@ -31,7 +50,6 @@ def main() -> None:
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if image.returncode:
         raise SystemExit("The existing cs427-validation:local image must be restored or built before evaluation.")
-    phases = ("generation", "grading") if args.phase == "all" else (args.phase,)
     if "generation" in phases:
         import winreg
 
@@ -52,9 +70,8 @@ def main() -> None:
         # The provider reads this environment variable without persisting it in model_kwargs.
         env["OPENAI_API_KEY"] = key
 
-    (code / "experiments" / study.name).mkdir(parents=True, exist_ok=True)
     mounts = [
-        "--mount", f"type=bind,source={code},target=/workspace",
+        "--mount", f"type=bind,source={frozen},target=/workspace,readonly",
         "--mount", f"type=bind,source={study},target=/workspace/experiments/{study.name}",
         "--mount", f"type=bind,source={root / 'SWE-bench'},target=/workspace/SWE-bench,readonly",
         "--mount", "type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock",

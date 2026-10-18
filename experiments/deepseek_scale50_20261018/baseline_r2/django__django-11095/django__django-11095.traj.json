@@ -1,0 +1,855 @@
+{
+  "info": {
+    "exit_status": "Submitted",
+    "submission": "diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex 5e7b23f9a0..fb10a2ed0b 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -580,9 +580,13 @@ class ModelAdmin(BaseModelAdmin):\n     def __str__(self):\n         return \"%s.%s\" % (self.model._meta.app_label, self.__class__.__name__)\n \n+    def get_inlines(self, request, obj):\n+        \"\"\"Hook for specifying custom inlines.\"\"\"\n+        return self.inlines\n+\n     def get_inline_instances(self, request, obj=None):\n         inline_instances = []\n-        for inline_class in self.inlines:\n+        for inline_class in self.get_inlines(request, obj):\n             inline = inline_class(self.model, self.admin_site)\n             if request:\n                 if not (inline.has_view_or_change_permission(request, obj) or\ndiff --git a/docs/ref/contrib/admin/index.txt b/docs/ref/contrib/admin/index.txt\nindex 93679c46fd..49b2b0f3d6 100644\n--- a/docs/ref/contrib/admin/index.txt\n+++ b/docs/ref/contrib/admin/index.txt\n@@ -1608,6 +1608,21 @@ templates used by the :class:`ModelAdmin` views:\n             def get_sortable_by(self, request):\n                 return {*self.get_list_display(request)} - {'rank'}\n \n+.. method:: ModelAdmin.get_inlines(request, obj)\n+\n+    The ``get_inlines`` method is given the ``HttpRequest`` and the\n+    ``obj`` being edited (or ``None`` on an add form) and is expected to return\n+    an iterable of inlines. You can override this method to dynamically add or\n+    remove inlines based on the request or model instance.\n+\n+    For example::\n+\n+        class MyModelAdmin(admin.ModelAdmin):\n+            def get_inlines(self, request, obj):\n+                if request.user.is_superuser:\n+                    return (MyInline,)\n+                return ()\n+\n .. method:: ModelAdmin.get_inline_instances(request, obj=None)\n \n     The ``get_inline_instances`` method is given the ``HttpRequest`` and the\ndiff --git a/docs/releases/3.0.txt b/docs/releases/3.0.txt\nindex d7ad7a8cf7..d0f5186d46 100644\n--- a/docs/releases/3.0.txt\n+++ b/docs/releases/3.0.txt\n@@ -47,6 +47,9 @@ Minor features\n * Added support for the ``admin_order_field`` attribute on properties in\n   :attr:`.ModelAdmin.list_display`.\n \n+* Added the :meth:`.ModelAdmin.get_inlines` hook to allow specifying inlines\n+  based on the request or model instance.\n+\n :mod:`django.contrib.admindocs`\n ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n \n",
+    "model_stats": {
+      "instance_cost": 0.002336484,
+      "api_calls": 17
+    },
+    "mini_version": "1.11.1",
+    "budget": {
+      "phase": "solving",
+      "limit_reason": "",
+      "remaining_steps": 383,
+      "remaining_cost": 9.997663516,
+      "remaining_seconds": null
+    },
+    "config": {
+      "agent": {
+        "system_template": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE action block per step. You can choose one of:\n- A bash code block with ONE command (or commands connected with && or ||)\n- A tool block to call an available tool\n\nInclude a THOUGHT section before your action where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n{% if tool_specs %}\nAvailable tools (name, description, parameters):\n{% for t in tool_specs %}- {{t.name}}: {{t.description}} ({{t.parameters}})\n{% endfor %}\n{% endif %}\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n\nor\n\n```tool\n{\"name\": \"tool_name\", \"args\": {\"k\": \"v\"}}\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected.\n",
+        "instance_template": "<pr_description>\nConsider the following PR description:\n{{task}}\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE action to execute (bash block or tool block)\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue, but do not include that script in the submission\n3. Edit the existing source file in place to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. Exactly one action: either a bash code block with your command, or a tool block\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n\nor\n\n```tool\n{\"name\": \"tool_name\", \"args\": {\"k\": \"v\"}}\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE action (either a bash block or a tool block)\n- A bash action MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple action blocks, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nEdit the existing source file that contains the bug. Do not leave the fix only in a new script.\nA reproduction script, image, or build directory must not be part of the submitted diff.\nWhen you have a source change, or you cannot make further progress, submit it even if you have not finished every check.\nAn empty submission cannot pass the tests.\nIssue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git diff HEAD\n```\n\nThis command submits changes to tracked files only.\nYou cannot continue working on this task after submitting.\n</instructions>\n",
+        "timeout_template": "The last command <command>{{action['action']}}</command> timed out and has been killed.\nThe output of the command was:\n <output>\n{{output}}\n</output>\nPlease try another command and make sure to avoid those requiring interactive input.",
+        "format_error_template": "Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.\n\nPlease format your action in triple backticks as shown in <response_examples>.\n\n<response_examples>\nHere are some thoughts about why you want to perform the action.\n\n```bash\n<bash_action>\n```\n\nor\n\n```tool\n{\"name\": \"<tool_name>\", \"args\": { ... }}\n```\n</response_examples>\n\nIf you have completed your assignment, please consult the first message about how to\nsubmit your solution (you will not be able to continue working on this task after that).\n",
+        "action_observation_template": "<returncode>{{output.returncode}}</returncode>\n{% if output.output | length < 10000 -%}\n<output>\n{{ output.output -}}\n</output>\n{%- else -%}\n<warning>\nThe output of your last command was too long.\nPlease try a different command that produces less output.\nIf you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.\nIf you're using grep or find and it produced too much output, you can use a more selective search pattern.\nIf you really need to see something from the full command's output, you can redirect output to a file and then search in that file.\n</warning>\n{%- set elided_chars = output.output | length - 10000 -%}\n<output_head>\n{{ output.output[:5000] }}\n</output_head>\n<elided_chars>\n{{ elided_chars }} characters elided\n</elided_chars>\n<output_tail>\n{{ output.output[-5000:] }}\n</output_tail>\n{%- endif -%}\n",
+        "step_limit": 400,
+        "cost_limit": 10.0,
+        "time_limit": 0.0,
+        "finalization_step_reserve": 0,
+        "finalization_time_reserve": 0.0,
+        "finalization_cost_reserve": 0.0,
+        "max_consecutive_model_errors": 3,
+        "enable_memory": false,
+        "memory_max_messages": 50,
+        "memory_dir": "",
+        "memory_session_id": "",
+        "memory_load_session": false,
+        "enabled_tools": [
+          "read_file",
+          "write_file",
+          "refined_read_file",
+          "search_file_content",
+          "replace",
+          "find_definition",
+          "read_many_files"
+        ]
+      },
+      "model": {
+        "model_name": "deepseek/deepseek-chat",
+        "model_kwargs": {
+          "drop_params": true,
+          "temperature": 0.0,
+          "timeout": 120,
+          "api_key": "sk-7d87cc3f95f84e5fb2f26339cc15b205"
+        },
+        "litellm_model_registry": null
+      },
+      "environment": {
+        "image": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-11095:latest",
+        "cwd": "/testbed",
+        "env": {
+          "PAGER": "cat",
+          "MANPAGER": "cat",
+          "LESS": "-R",
+          "PIP_PROGRESS_BAR": "off",
+          "TQDM_DISABLE": "1"
+        },
+        "forward_env": [],
+        "timeout": 60,
+        "executable": "docker",
+        "run_args": [
+          "--rm",
+          "--platform",
+          "linux/amd64"
+        ],
+        "container_timeout": "2h",
+        "pull_timeout": 900
+      },
+      "agent_type": "__main__.ProgressTrackingAgent",
+      "model_type": "minisweagent.models.litellm_model.LitellmModel",
+      "environment_type": "minisweagent.environments.docker.DockerEnvironment"
+    },
+    "agent_exit_status": "Submitted"
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.\nYour response must contain exactly ONE action block per step. You can choose one of:\n- A bash code block with ONE command (or commands connected with && or ||)\n- A tool block to call an available tool\n\nInclude a THOUGHT section before your action where you explain your reasoning process.\nFormat your response as shown in <format_example>.\n\n\nAvailable tools (name, description, parameters):\n- read_file: Read a UTF-8 text file. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to the file to read'}}, 'required': ['path'], 'additionalProperties': False})\n- write_file: Write content to a file inside the workspace. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to the file to write'}, 'content': {'type': 'string', 'description': 'Content to write to the file'}}, 'required': ['path', 'content'], 'additionalProperties': False})\n- find_definition: Find where a function, class, or variable is defined. Searches for definitions matching the symbol name and returns location with context. ({'type': 'object', 'properties': {'symbol': {'type': 'string', 'description': 'Name of the function, class, or variable to find'}, 'path': {'type': 'string', 'description': 'File or directory path to search in (default: current directory)'}, 'symbol_type': {'type': 'string', 'enum': ['any', 'function', 'class', 'variable'], 'description': 'Type of symbol to find (default: any)', 'default': 'any'}, 'context_lines': {'type': 'integer', 'description': 'Number of context lines to show around the definition (default: 5)', 'default': 5}}, 'required': ['symbol'], 'additionalProperties': False})\n- refined_read_file: Read a text file with targeted line selection to reduce tokens. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to the file to read'}, 'selector': {'type': 'object', 'description': 'Line selection strategy (provide exactly one)', 'properties': {'lines': {'type': 'array', 'items': {'type': 'integer', 'minimum': 1}, 'description': 'Exact line numbers (1-indexed)'}, 'range': {'type': 'object', 'properties': {'start': {'type': 'integer', 'minimum': 1}, 'end': {'type': 'integer', 'minimum': 1}}, 'required': ['start', 'end'], 'description': 'Inclusive line range'}, 'head': {'type': 'integer', 'minimum': 0, 'description': 'First N lines'}, 'tail': {'type': 'integer', 'minimum': 0, 'description': 'Last N lines'}, 'around': {'type': 'object', 'properties': {'line': {'type': 'integer', 'minimum': 1}, 'radius': {'type': 'integer', 'minimum': 0}}, 'required': ['line', 'radius'], 'description': 'Window around a line'}}}, 'strip_comments': {'type': 'boolean', 'description': 'Remove comments (best-effort for .py and // languages)', 'default': False}, 'max_chars': {'type': 'integer', 'minimum': 1, 'description': 'Hard cap on output characters', 'default': 20000}}, 'required': ['path'], 'additionalProperties': False})\n- read_many_files: Read multiple files at once with optional line limits per file. Returns a structured summary with file contents and metadata. ({'type': 'object', 'properties': {'paths': {'type': 'array', 'items': {'type': 'string'}, 'description': 'List of file paths to read', 'minItems': 1, 'maxItems': 20}, 'max_lines_per_file': {'type': 'integer', 'minimum': 1, 'description': 'Maximum lines to read from each file (default: 100)', 'default': 100}, 'include_metadata': {'type': 'boolean', 'description': 'Include file metadata (size, line count, etc.) (default: true)', 'default': True}, 'strip_empty_lines': {'type': 'boolean', 'description': 'Remove empty lines from output (default: false)', 'default': False}, 'max_total_chars': {'type': 'integer', 'minimum': 100, 'description': 'Hard cap on total output characters (default: 50000)', 'default': 50000}}, 'required': ['paths'], 'additionalProperties': False})\n- replace: Search and replace text in a file under the workspace. replace the first or all occurrences. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'path to the file'}, 'old_text': {'type': 'string', 'description': 'content to search for'}, 'new_text': {'type': 'string', 'description': 'content to be replaced'}, 'replace_all': {'type': 'boolean', 'description': 'Replace all occurrences', 'default': True}}, 'required': ['path', 'old_text', 'new_text'], 'additionalProperties': False})\n- search_file_content: Search for text patterns in a file and show surrounding context. Returns matching lines with line numbers and configurable context lines. ({'type': 'object', 'properties': {'path': {'type': 'string', 'description': 'Path to the file to search in'}, 'pattern': {'type': 'string', 'description': 'Text pattern to search for (literal text or regex if use_regex is true)'}, 'context_lines': {'type': 'integer', 'description': 'Number of lines to show before and after each match (default: 3)'}, 'use_regex': {'type': 'boolean', 'description': 'Treat pattern as regex instead of literal text (default: false)'}, 'case_sensitive': {'type': 'boolean', 'description': 'Whether search should be case-sensitive (default: true)'}}, 'required': ['path', 'pattern'], 'additionalProperties': False})\n\n\n\n<format_example>\nTHOUGHT: Your reasoning and analysis here\n\n```bash\nyour_command_here\n```\n\nor\n\n```tool\n{\"name\": \"tool_name\", \"args\": {\"k\": \"v\"}}\n```\n</format_example>\n\nFailure to follow these rules will cause your response to be rejected."
+    },
+    {
+      "role": "user",
+      "content": "<pr_description>\nConsider the following PR description:\nadd ModelAdmin.get_inlines() hook to allow set inlines based on the request or model instance.\nDescription\n\t\nadd ModelAdmin.get_inlines() hook to allow set inlines based on the request or model instance.\nCurrently, We can override the method get_inline_instances to do such a thing, but a for loop should be copied to my code. So I wished add a hook get_inlines(request, obj=None)\n\n</pr_description>\n\n<instructions>\n# Task Instructions\n\n## Overview\nYou're a software engineer interacting continuously with a computer by submitting commands.\nYou'll be helping implement necessary changes to meet requirements in the PR description.\nYour task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.\n\nIMPORTANT: This is an interactive process where you will think and issue ONE command, see its result, then think and issue your next command.\n\nFor each response:\n1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish\n2. Provide exactly ONE action to execute (bash block or tool block)\n\n## Important Boundaries\n- MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)\n- DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)\n\n## Recommended Workflow\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue, but do not include that script in the submission\n3. Edit the existing source file in place to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n\n## Command Execution Rules\nYou are operating in an environment where\n1. You write a single command\n2. The system executes that command in a subshell\n3. You see the result\n4. You write your next command\n\nEach response should include:\n1. A **THOUGHT** section where you explain your reasoning and plan\n2. Exactly one action: either a bash code block with your command, or a tool block\n\nFormat your responses like this:\n\n<format_example>\nTHOUGHT: Here I explain my reasoning process, analysis of the current situation,\nand what I'm trying to accomplish with the command below.\n\n```bash\nyour_command_here\n```\n\nor\n\n```tool\n{\"name\": \"tool_name\", \"args\": {\"k\": \"v\"}}\n```\n</format_example>\n\nCommands must be specified in a single bash code block:\n\n```bash\nyour_command_here\n```\n\n**CRITICAL REQUIREMENTS:**\n- Your response SHOULD include a THOUGHT section explaining your reasoning\n- Your response MUST include EXACTLY ONE action (either a bash block or a tool block)\n- A bash action MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)\n- If you include zero or multiple action blocks, YOUR RESPONSE WILL FAIL\n- Do NOT try to run multiple independent commands in separate blocks in one response\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n\nExample of a CORRECT response:\n<example_response>\nTHOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n```bash\nls -la\n```\n</example_response>\n\nExample of an INCORRECT response:\n<example_response>\nTHOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.\n\n```bash\nls -la\n```\n\nNow I'll read the file:\n\n```bash\ncat file.txt\n```\n</example_response>\n\nIf you need to run multiple commands, either:\n1. Combine them in one block using && or ||\n```bash\ncommand1 && command2 || echo \"Error occurred\"\n```\n\n2. Wait for the first command to complete, see its output, then issue the next command in your following response.\n\n## Environment Details\n- You have a full Linux shell environment\n- Always use non-interactive flags (-y, -f) for commands\n- Avoid interactive tools like vi, nano, or any that require user input\n- If a command isn't available, you can install it\n\n## Useful Command Examples\n\n### Create a new file:\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:\n```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n```bash\nanything\n```\n\n## Submission\nEdit the existing source file that contains the bug. Do not leave the fix only in a new script.\nA reproduction script, image, or build directory must not be part of the submitted diff.\nWhen you have a source change, or you cannot make further progress, submit it even if you have not finished every check.\nAn empty submission cannot pass the tests.\nIssue exactly the following command:\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git diff HEAD\n```\n\nThis command submits changes to tracked files only.\nYou cannot continue working on this task after submitting.\n</instructions>"
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I need to find the ModelAdmin class and its get_inline_instances method in the Django codebase.\n\n```bash\ngrep -rn \"def get_inline_instances\" /testbed/django/contrib/admin/\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "f1a5e694-9ed9-4983-b79a-3076b96b91dd",
+          "created": 1792309707,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I need to find the ModelAdmin class and its get_inline_instances method in the Django codebase.\n\n```bash\ngrep -rn \"def get_inline_instances\" /testbed/django/contrib/admin/\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 54,
+            "prompt_tokens": 2709,
+            "total_tokens": 2763,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 2560
+            },
+            "prompt_cache_hit_tokens": 2560,
+            "prompt_cache_miss_tokens": 149
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n/testbed/django/contrib/admin/options.py:583:    def get_inline_instances(self, request, obj=None):\n</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "<tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"/testbed/django/contrib/admin/options.py\", \"selector\": {\"range\": {\"start\": 560, \"end\": 620}}}}",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "51762748-178d-4ed6-86e7-ba3f98e9cfd9",
+          "created": 1792309708,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "<tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"/testbed/django/contrib/admin/options.py\", \"selector\": {\"range\": {\"start\": 560, \"end\": 620}}}}",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 49,
+            "prompt_tokens": 2810,
+            "total_tokens": 2859,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 2560
+            },
+            "prompt_cache_hit_tokens": 2560,
+            "prompt_cache_miss_tokens": 250
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "Please always provide EXACTLY ONE action in triple backticks, found 0 actions.\n\nPlease format your action in triple backticks as shown in <response_examples>.\n\n<response_examples>\nHere are some thoughts about why you want to perform the action.\n\n```bash\n<bash_action>\n```\n\nor\n\n```tool\n{\"name\": \"<tool_name>\", \"args\": { ... }}\n```\n</response_examples>\n\nIf you have completed your assignment, please consult the first message about how to\nsubmit your solution (you will not be able to continue working on this task after that)."
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I need to read the get_inline_instances method to understand its implementation.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"/testbed/django/contrib/admin/options.py\", \"selector\": {\"range\": {\"start\": 560, \"end\": 620}}}}\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "383692a4-17f6-46c4-86e0-284f5b718db2",
+          "created": 1792309710,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I need to read the get_inline_instances method to understand its implementation.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"/testbed/django/contrib/admin/options.py\", \"selector\": {\"range\": {\"start\": 560, \"end\": 620}}}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 72,
+            "prompt_tokens": 2983,
+            "total_tokens": 3055,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 2688
+            },
+            "prompt_cache_hit_tokens": 2688,
+            "prompt_cache_miss_tokens": 295
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n{\n  \"path\": \"/testbed/django/contrib/admin/options.py\",\n  \"encoding\": \"utf-8\",\n  \"start_line\": 560,\n  \"line_count\": 61,\n  \"truncated\": false,\n  \"content\": \"    change_list_template = None\\n    delete_confirmation_template = None\\n    delete_selected_confirmation_template = None\\n    object_history_template = None\\n    popup_response_template = None\\n\\n    # Actions\\n    actions = []\\n    action_form = helpers.ActionForm\\n    actions_on_top = True\\n    actions_on_bottom = False\\n    actions_selection_counter = True\\n    checks_class = ModelAdminChecks\\n\\n    def __init__(self, model, admin_site):\\n        self.model = model\\n        self.opts = model._meta\\n        self.admin_site = admin_site\\n        super().__init__()\\n\\n    def __str__(self):\\n        return \\\"%s.%s\\\" % (self.model._meta.app_label, self.__class__.__name__)\\n\\n    def get_inline_instances(self, request, obj=None):\\n        inline_instances = []\\n        for inline_class in self.inlines:\\n            inline = inline_class(self.model, self.admin_site)\\n            if request:\\n                if not (inline.has_view_or_change_permission(request, obj) or\\n                        inline.has_add_permission(request, obj) or\\n                        inline.has_delete_permission(request, obj)):\\n                    continue\\n                if not inline.has_add_permission(request, obj):\\n                    inline.max_num = 0\\n            inline_instances.append(inline)\\n\\n        return inline_instances\\n\\n    def get_urls(self):\\n        from django.urls import path\\n\\n        def wrap(view):\\n            def wrapper(*args, **kwargs):\\n                return self.admin_site.admin_view(view)(*args, **kwargs)\\n            wrapper.model_admin = self\\n            return update_wrapper(wrapper, view)\\n\\n        info = self.model._meta.app_label, self.model._meta.model_name\\n\\n        urlpatterns = [\\n            path('', wrap(self.changelist_view), name='%s_%s_changelist' % info),\\n            path('add/', wrap(self.add_view), name='%s_%s_add' % info),\\n            path('autocomplete/', wrap(self.autocomplete_view), name='%s_%s_autocomplete' % info),\\n            path('<path:object_id>/history/', wrap(self.history_view), name='%s_%s_history' % info),\\n            path('<path:object_id>/delete/', wrap(self.delete_view), name='%s_%s_delete' % info),\\n            path('<path:object_id>/change/', wrap(self.change_view), name='%s_%s_change' % info),\\n            # For backwards compatibility (was the change url before 1.9)\\n            path('<path:object_id>/', wrap(RedirectView.as_view(\\n                pattern_name='%s:%s_%s_change' % ((self.admin_site.name,) + info)\\n            ))),\\n        ]\\n\"\n}</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll add a `get_inlines` hook and modify `get_inline_instances` to use it. Let me make the edit.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"/testbed/django/contrib/admin/options.py\", \"old_text\": \"    def get_inline_instances(self, request, obj=None):\\n        inline_instances = []\\n        for inline_class in self.inlines:\", \"new_text\": \"    def get_inlines(self, request, obj):\\n        \\\"\\\"\\\"Hook for specifying custom inlines.\\\"\\\"\\\"\\n        return self.inlines\\n\\n    def get_inline_instances(self, request, obj=None):\\n        inline_instances = []\\n        for inline_class in self.get_inlines(request, obj):\"}}\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "1b80df5f-3af5-4817-a47d-1989a1939bcc",
+          "created": 1792309711,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll add a `get_inlines` hook and modify `get_inline_instances` to use it. Let me make the edit.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"/testbed/django/contrib/admin/options.py\", \"old_text\": \"    def get_inline_instances(self, request, obj=None):\\n        inline_instances = []\\n        for inline_class in self.inlines:\", \"new_text\": \"    def get_inlines(self, request, obj):\\n        \\\"\\\"\\\"Hook for specifying custom inlines.\\\"\\\"\\\"\\n        return self.inlines\\n\\n    def get_inline_instances(self, request, obj=None):\\n        inline_instances = []\\n        for inline_class in self.get_inlines(request, obj):\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 185,
+            "prompt_tokens": 3772,
+            "total_tokens": 3957,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 2944
+            },
+            "prompt_cache_hit_tokens": 2944,
+            "prompt_cache_miss_tokens": 828
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nSuccessfully replaced 1 occurrence(s) in /testbed/django/contrib/admin/options.py</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now let me verify the change and check if there are other places that reference `self.inlines` for inline instances that should use the hook. Let me also check the docs.\n\n```bash\ncd /testbed && sed -n '580,600p' django/contrib/admin/options.py && grep -rn \"self.inlines\" django/contrib/admin/options.py\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "522e7133-c9ce-49a7-9cc9-ce5ac7fb7ee4",
+          "created": 1792309714,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now let me verify the change and check if there are other places that reference `self.inlines` for inline instances that should use the hook. Let me also check the docs.\n\n```bash\ncd /testbed && sed -n '580,600p' django/contrib/admin/options.py && grep -rn \"self.inlines\" django/contrib/admin/options.py\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 83,
+            "prompt_tokens": 3996,
+            "total_tokens": 4079,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 3840
+            },
+            "prompt_cache_hit_tokens": 3840,
+            "prompt_cache_miss_tokens": 156
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n    def __str__(self):\n        return \"%s.%s\" % (self.model._meta.app_label, self.__class__.__name__)\n\n    def get_inlines(self, request, obj):\n        \"\"\"Hook for specifying custom inlines.\"\"\"\n        return self.inlines\n\n    def get_inline_instances(self, request, obj=None):\n        inline_instances = []\n        for inline_class in self.get_inlines(request, obj):\n            inline = inline_class(self.model, self.admin_site)\n            if request:\n                if not (inline.has_view_or_change_permission(request, obj) or\n                        inline.has_add_permission(request, obj) or\n                        inline.has_delete_permission(request, obj)):\n                    continue\n                if not inline.has_add_permission(request, obj):\n                    inline.max_num = 0\n            inline_instances.append(inline)\n\n        return inline_instances\n585:        return self.inlines\n</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: The change is in place. Let me also add documentation for the new hook. Let me find the relevant docs section.\n\n```bash\ncd /testbed && grep -rn \"get_inline_instances\" docs/\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "e2f91896-6587-4b6a-bda7-edf19830ed34",
+          "created": 1792309715,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: The change is in place. Let me also add documentation for the new hook. Let me find the relevant docs section.\n\n```bash\ncd /testbed && grep -rn \"get_inline_instances\" docs/\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 51,
+            "prompt_tokens": 4293,
+            "total_tokens": 4344,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 3968
+            },
+            "prompt_cache_hit_tokens": 3968,
+            "prompt_cache_miss_tokens": 325
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\ndocs/ref/contrib/admin/index.txt:1611:.. method:: ModelAdmin.get_inline_instances(request, obj=None)\ndocs/ref/contrib/admin/index.txt:1613:    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\ndocs/ref/contrib/admin/index.txt:1623:            def get_inline_instances(self, request, obj=None):\ndocs/ref/contrib/admin/index.txt:1748:                for inline in self.get_inline_instances(request, obj):\n</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Let me read the docs section around get_inline_instances to add documentation for get_inlines.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"/testbed/docs/ref/contrib/admin/index.txt\", \"selector\": {\"range\": {\"start\": 1600, \"end\": 1640}}}}\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "2b45f81e-16d1-4ed0-a88b-3da848d70f87",
+          "created": 1792309717,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Let me read the docs section around get_inline_instances to add documentation for get_inlines.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"/testbed/docs/ref/contrib/admin/index.txt\", \"selector\": {\"range\": {\"start\": 1600, \"end\": 1640}}}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 78,
+            "prompt_tokens": 4478,
+            "total_tokens": 4556,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 4224
+            },
+            "prompt_cache_hit_tokens": 4224,
+            "prompt_cache_miss_tokens": 254
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n{\n  \"path\": \"/testbed/docs/ref/contrib/admin/index.txt\",\n  \"encoding\": \"utf-8\",\n  \"start_line\": 1600,\n  \"line_count\": 41,\n  \"truncated\": false,\n  \"content\": \"\\n    Its default implementation returns :attr:`sortable_by` if it's set,\\n    otherwise it defers to :meth:`get_list_display`.\\n\\n    For example, to prevent one or more columns from being sortable::\\n\\n        class PersonAdmin(admin.ModelAdmin):\\n\\n            def get_sortable_by(self, request):\\n                return {*self.get_list_display(request)} - {'rank'}\\n\\n.. method:: ModelAdmin.get_inline_instances(request, obj=None)\\n\\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\\n    ``obj`` being edited (or ``None`` on an add form) and is expected to return\\n    a ``list`` or ``tuple`` of :class:`~django.contrib.admin.InlineModelAdmin`\\n    objects, as described below in the :class:`~django.contrib.admin.InlineModelAdmin`\\n    section. For example, the following would return inlines without the default\\n    filtering based on add, change, delete, and view permissions::\\n\\n        class MyModelAdmin(admin.ModelAdmin):\\n            inlines = (MyInline,)\\n\\n            def get_inline_instances(self, request, obj=None):\\n                return [inline(self.model, self.admin_site) for inline in self.inlines]\\n\\n    If you override this method, make sure that the returned inlines are\\n    instances of the classes defined in :attr:`inlines` or you might encounter\\n    a \\\"Bad Request\\\" error when adding related objects.\\n\\n.. method:: ModelAdmin.get_urls()\\n\\n    The ``get_urls`` method on a ``ModelAdmin`` returns the URLs to be used for\\n    that ModelAdmin in the same way as a URLconf.  Therefore you can extend\\n    them as documented in :doc:`/topics/http/urls`::\\n\\n        from django.contrib import admin\\n        from django.template.response import TemplateResponse\\n        from django.urls import path\\n\\n        class MyModelAdmin(admin.ModelAdmin):\\n\"\n}</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll add documentation for get_inlines before get_inline_instances.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"/testbed/docs/ref/contrib/admin/index.txt\", \"old_text\": \".. method:: ModelAdmin.get_inline_instances(request, obj=None)\\n\\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\", \"new_text\": \".. method:: ModelAdmin.get_inlines(request, obj)\\n\\n    The ``get_inlines`` method is given the ``HttpRequest`` and the\\n    ``obj`` being edited (or ``None`` on an add form) and is expected to return\\n    an iterable of inlines. You can override this method to dynamically add or\\n    remove inlines based on the request or model instance.\\n\\n    For example::\\n\\n        class MyModelAdmin(admin.ModelAdmin):\\n            def get_inlines(self, request, obj):\\n                if request.user.is_superuser:\\n                    return (MyInline,)\\n                return ()\\n\\n.. method:: ModelAdmin.get_inline_instances(request, obj=None)\\n\\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"}}\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "b739af2b-f8ce-4189-826b-5bd0bc06b3b9",
+          "created": 1792309718,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll add documentation for get_inlines before get_inline_instances.\n\n```tool\n{\"name\": \"replace\", \"args\": {\"path\": \"/testbed/docs/ref/contrib/admin/index.txt\", \"old_text\": \".. method:: ModelAdmin.get_inline_instances(request, obj=None)\\n\\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\", \"new_text\": \".. method:: ModelAdmin.get_inlines(request, obj)\\n\\n    The ``get_inlines`` method is given the ``HttpRequest`` and the\\n    ``obj`` being edited (or ``None`` on an add form) and is expected to return\\n    an iterable of inlines. You can override this method to dynamically add or\\n    remove inlines based on the request or model instance.\\n\\n    For example::\\n\\n        class MyModelAdmin(admin.ModelAdmin):\\n            def get_inlines(self, request, obj):\\n                if request.user.is_superuser:\\n                    return (MyInline,)\\n                return ()\\n\\n.. method:: ModelAdmin.get_inline_instances(request, obj=None)\\n\\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 280,
+            "prompt_tokens": 5089,
+            "total_tokens": 5369,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 4480
+            },
+            "prompt_cache_hit_tokens": 4480,
+            "prompt_cache_miss_tokens": 609
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>1</returncode>\n<output>\nTool 'replace' error: [Errno 7] Argument list too long: 'docker'</output>",
+      "extra": {
+        "returncode": 1
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: The replace tool failed due to argument length. Let me use a Python script to do the replacement instead.\n\n```bash\ncd /testbed && python - <<'EOF'\npath = 'docs/ref/contrib/admin/index.txt'\nwith open(path) as f:\n    content = f.read()\nold = \".. method:: ModelAdmin.get_inline_instances(request, obj=None)\\n\\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"\nnew = \"\"\".. method:: ModelAdmin.get_inlines(request, obj)\n\n    The ``get_inlines`` method is given the ``HttpRequest`` and the\n    ``obj`` being edited (or ``None`` on an add form) and is expected to return\n    an iterable of inlines. You can override this method to dynamically add or\n    remove inlines based on the request or model instance.\n\n    For example::\n\n        class MyModelAdmin(admin.ModelAdmin):\n            def get_inlines(self, request, obj):\n                if request.user.is_superuser:\n                    return (MyInline,)\n                return ()\n\n.. method:: ModelAdmin.get_inline_instances(request, obj=None)\n\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"\"\"\nassert old in content\ncontent = content.replace(old, new, 1)\nwith open(path, 'w') as f:\n    f.write(content)\nprint(\"done\")\nEOF\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "c29a4ca7-9415-4d2e-a97d-2d68531ace36",
+          "created": 1792309720,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: The replace tool failed due to argument length. Let me use a Python script to do the replacement instead.\n\n```bash\ncd /testbed && python - <<'EOF'\npath = 'docs/ref/contrib/admin/index.txt'\nwith open(path) as f:\n    content = f.read()\nold = \".. method:: ModelAdmin.get_inline_instances(request, obj=None)\\n\\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"\nnew = \"\"\".. method:: ModelAdmin.get_inlines(request, obj)\n\n    The ``get_inlines`` method is given the ``HttpRequest`` and the\n    ``obj`` being edited (or ``None`` on an add form) and is expected to return\n    an iterable of inlines. You can override this method to dynamically add or\n    remove inlines based on the request or model instance.\n\n    For example::\n\n        class MyModelAdmin(admin.ModelAdmin):\n            def get_inlines(self, request, obj):\n                if request.user.is_superuser:\n                    return (MyInline,)\n                return ()\n\n.. method:: ModelAdmin.get_inline_instances(request, obj=None)\n\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"\"\"\nassert old in content\ncontent = content.replace(old, new, 1)\nwith open(path, 'w') as f:\n    f.write(content)\nprint(\"done\")\nEOF\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 312,
+            "prompt_tokens": 5408,
+            "total_tokens": 5720,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 5248
+            },
+            "prompt_cache_hit_tokens": 5248,
+            "prompt_cache_miss_tokens": 160
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>1</returncode>\n<output>\nTraceback (most recent call last):\n  File \"<stdin>\", line 3, in <module>\n  File \"/opt/miniconda3/envs/testbed/lib/python3.6/encodings/ascii.py\", line 26, in decode\n    return codecs.ascii_decode(input, self.errors)[0]\nUnicodeDecodeError: 'ascii' codec can't decode byte 0xe2 in position 87755: ordinal not in range(128)\n</output>",
+      "extra": {
+        "returncode": 1
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Need to specify UTF-8 encoding.\n\n```bash\ncd /testbed && python - <<'EOF'\npath = 'docs/ref/contrib/admin/index.txt'\nwith open(path, encoding='utf-8') as f:\n    content = f.read()\nold = \".. method:: ModelAdmin.get_inline_instances(request, obj=None)\\n\\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"\nnew = \"\"\".. method:: ModelAdmin.get_inlines(request, obj)\n\n    The ``get_inlines`` method is given the ``HttpRequest`` and the\n    ``obj`` being edited (or ``None`` on an add form) and is expected to return\n    an iterable of inlines. You can override this method to dynamically add or\n    remove inlines based on the request or model instance.\n\n    For example::\n\n        class MyModelAdmin(admin.ModelAdmin):\n            def get_inlines(self, request, obj):\n                if request.user.is_superuser:\n                    return (MyInline,)\n                return ()\n\n.. method:: ModelAdmin.get_inline_instances(request, obj=None)\n\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"\"\"\nassert old in content\ncontent = content.replace(old, new, 1)\nwith open(path, 'w', encoding='utf-8') as f:\n    f.write(content)\nprint(\"done\")\nEOF\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "afdd5b22-e15d-4830-9ea3-5f4d07b2df29",
+          "created": 1792309722,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Need to specify UTF-8 encoding.\n\n```bash\ncd /testbed && python - <<'EOF'\npath = 'docs/ref/contrib/admin/index.txt'\nwith open(path, encoding='utf-8') as f:\n    content = f.read()\nold = \".. method:: ModelAdmin.get_inline_instances(request, obj=None)\\n\\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"\nnew = \"\"\".. method:: ModelAdmin.get_inlines(request, obj)\n\n    The ``get_inlines`` method is given the ``HttpRequest`` and the\n    ``obj`` being edited (or ``None`` on an add form) and is expected to return\n    an iterable of inlines. You can override this method to dynamically add or\n    remove inlines based on the request or model instance.\n\n    For example::\n\n        class MyModelAdmin(admin.ModelAdmin):\n            def get_inlines(self, request, obj):\n                if request.user.is_superuser:\n                    return (MyInline,)\n                return ()\n\n.. method:: ModelAdmin.get_inline_instances(request, obj=None)\n\n    The ``get_inline_instances`` method is given the ``HttpRequest`` and the\"\"\"\nassert old in content\ncontent = content.replace(old, new, 1)\nwith open(path, 'w', encoding='utf-8') as f:\n    f.write(content)\nprint(\"done\")\nEOF\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 311,
+            "prompt_tokens": 5842,
+            "total_tokens": 6153,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 5632
+            },
+            "prompt_cache_hit_tokens": 5632,
+            "prompt_cache_miss_tokens": 210
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\ndone\n</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Now let me verify the change works by running a quick test and checking the diff.\n\n```bash\ncd /testbed && git diff HEAD && python -c \"import django; print(django.VERSION)\"\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "63968027-a259-49b7-b8d6-cc48e8b74095",
+          "created": 1792309724,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Now let me verify the change works by running a quick test and checking the diff.\n\n```bash\ncd /testbed && git diff HEAD && python -c \"import django; print(django.VERSION)\"\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 48,
+            "prompt_tokens": 6174,
+            "total_tokens": 6222,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 6016
+            },
+            "prompt_cache_hit_tokens": 6016,
+            "prompt_cache_miss_tokens": 158
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\ndiff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex 5e7b23f9a0..fb10a2ed0b 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -580,9 +580,13 @@ class ModelAdmin(BaseModelAdmin):\n     def __str__(self):\n         return \"%s.%s\" % (self.model._meta.app_label, self.__class__.__name__)\n \n+    def get_inlines(self, request, obj):\n+        \"\"\"Hook for specifying custom inlines.\"\"\"\n+        return self.inlines\n+\n     def get_inline_instances(self, request, obj=None):\n         inline_instances = []\n-        for inline_class in self.inlines:\n+        for inline_class in self.get_inlines(request, obj):\n             inline = inline_class(self.model, self.admin_site)\n             if request:\n                 if not (inline.has_view_or_change_permission(request, obj) or\ndiff --git a/docs/ref/contrib/admin/index.txt b/docs/ref/contrib/admin/index.txt\nindex 93679c46fd..49b2b0f3d6 100644\n--- a/docs/ref/contrib/admin/index.txt\n+++ b/docs/ref/contrib/admin/index.txt\n@@ -1608,6 +1608,21 @@ templates used by the :class:`ModelAdmin` views:\n             def get_sortable_by(self, request):\n                 return {*self.get_list_display(request)} - {'rank'}\n \n+.. method:: ModelAdmin.get_inlines(request, obj)\n+\n+    The ``get_inlines`` method is given the ``HttpRequest`` and the\n+    ``obj`` being edited (or ``None`` on an add form) and is expected to return\n+    an iterable of inlines. You can override this method to dynamically add or\n+    remove inlines based on the request or model instance.\n+\n+    For example::\n+\n+        class MyModelAdmin(admin.ModelAdmin):\n+            def get_inlines(self, request, obj):\n+                if request.user.is_superuser:\n+                    return (MyInline,)\n+                return ()\n+\n .. method:: ModelAdmin.get_inline_instances(request, obj=None)\n \n     The ``get_inline_instances`` method is given the ``HttpRequest`` and the\n(3, 0, 0, 'alpha', 0)\n</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: The changes look good. Let me run the existing admin inline tests to make sure nothing is broken.\n\n```bash\ncd /testbed && python tests/runtests.py admin_inlines --verbosity 1 2>&1 | tail -20\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "087a6f5b-39bf-43c6-8268-e4557d45fcfb",
+          "created": 1792309726,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: The changes look good. Let me run the existing admin inline tests to make sure nothing is broken.\n\n```bash\ncd /testbed && python tests/runtests.py admin_inlines --verbosity 1 2>&1 | tail -20\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 57,
+            "prompt_tokens": 6779,
+            "total_tokens": 6836,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 6144
+            },
+            "prompt_cache_hit_tokens": 6144,
+            "prompt_cache_miss_tokens": 635
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\nCloning test database for alias 'default'...\nCloning test database for alias 'default'...\nCloning test database for alias 'default'...\nCloning test database for alias 'default'...\nCloning test database for alias 'default'...\nCloning test database for alias 'default'...\nCloning test database for alias 'default'...\nssssss.................................................\n----------------------------------------------------------------------\nRan 55 tests in 1.222s\n\nOK (skipped=6)\nDestroying test database for alias 'default'...\nDestroying test database for alias 'default'...\nDestroying test database for alias 'default'...\nDestroying test database for alias 'default'...\nDestroying test database for alias 'default'...\nDestroying test database for alias 'default'...\nDestroying test database for alias 'default'...\nDestroying test database for alias 'default'...\n</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Tests pass. Let me also add a release note since this is a new feature. Let me check the release notes file.\n\n```bash\ncd /testbed && grep -n \"get_inline_instances\\|ModelAdmin\" docs/releases/3.0.txt | head\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "2522c0e2-ede8-4578-ad94-0f17f21ce191",
+          "created": 1792309730,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Tests pass. Let me also add a release note since this is a new feature. Let me check the release notes file.\n\n```bash\ncd /testbed && grep -n \"get_inline_instances\\|ModelAdmin\" docs/releases/3.0.txt | head\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 64,
+            "prompt_tokens": 7030,
+            "total_tokens": 7094,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 6784
+            },
+            "prompt_cache_hit_tokens": 6784,
+            "prompt_cache_miss_tokens": 246
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n48:  :attr:`.ModelAdmin.list_display`.\n</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: Let me look at the admin section of the 3.0 release notes to add an entry.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"/testbed/docs/releases/3.0.txt\", \"selector\": {\"range\": {\"start\": 30, \"end\": 70}}}}\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "fcf56780-5d1e-4c58-9c6c-d809495ddcfa",
+          "created": 1792309732,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: Let me look at the admin section of the 3.0 release notes to add an entry.\n\n```tool\n{\"name\": \"refined_read_file\", \"args\": {\"path\": \"/testbed/docs/releases/3.0.txt\", \"selector\": {\"range\": {\"start\": 30, \"end\": 70}}}}\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 75,
+            "prompt_tokens": 7126,
+            "total_tokens": 7201,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 6912
+            },
+            "prompt_cache_hit_tokens": 6912,
+            "prompt_cache_miss_tokens": 214
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n{\n  \"path\": \"/testbed/docs/releases/3.0.txt\",\n  \"encoding\": \"utf-8\",\n  \"start_line\": 30,\n  \"line_count\": 41,\n  \"truncated\": false,\n  \"content\": \"Following the release of Django 3.0, we suggest that third-party app authors\\ndrop support for all versions of Django prior to 2.2. At that time, you should\\nbe able to run your package's tests using ``python -Wd`` so that deprecation\\nwarnings appear. After making the deprecation warning fixes, your app should be\\ncompatible with Django 3.0.\\n\\n.. _whats-new-3.0:\\n\\nWhat's new in Django 3.0\\n========================\\n\\nMinor features\\n--------------\\n\\n:mod:`django.contrib.admin`\\n~~~~~~~~~~~~~~~~~~~~~~~~~~~\\n\\n* Added support for the ``admin_order_field`` attribute on properties in\\n  :attr:`.ModelAdmin.list_display`.\\n\\n:mod:`django.contrib.admindocs`\\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\\n\\n* ...\\n\\n:mod:`django.contrib.auth`\\n~~~~~~~~~~~~~~~~~~~~~~~~~~\\n\\n* ...\\n\\n:mod:`django.contrib.contenttypes`\\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\\n\\n* ...\\n\\n:mod:`django.contrib.gis`\\n~~~~~~~~~~~~~~~~~~~~~~~~~\\n\\n* Allowed MySQL spatial lookup functions to operate on real geometries.\\n  Previous support was limited to bounding boxes.\\n\\n\"\n}</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: I'll add a release note entry for the new get_inlines hook.\n\n```bash\ncd /testbed && python - <<'EOF'\npath = 'docs/releases/3.0.txt'\nwith open(path, encoding='utf-8') as f:\n    content = f.read()\nold = \"\"\"* Added support for the ``admin_order_field`` attribute on properties in\n  :attr:`.ModelAdmin.list_display`.\n\"\"\"\nnew = \"\"\"* Added support for the ``admin_order_field`` attribute on properties in\n  :attr:`.ModelAdmin.list_display`.\n\n* Added the :meth:`.ModelAdmin.get_inlines` hook to allow specifying inlines\n  based on the request or model instance.\n\"\"\"\nassert old in content\ncontent = content.replace(old, new, 1)\nwith open(path, 'w', encoding='utf-8') as f:\n    f.write(content)\nprint(\"done\")\nEOF\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "c8ef868e-5b0f-48b2-9726-ab33b462afd2",
+          "created": 1792309733,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: I'll add a release note entry for the new get_inlines hook.\n\n```bash\ncd /testbed && python - <<'EOF'\npath = 'docs/releases/3.0.txt'\nwith open(path, encoding='utf-8') as f:\n    content = f.read()\nold = \"\"\"* Added support for the ``admin_order_field`` attribute on properties in\n  :attr:`.ModelAdmin.list_display`.\n\"\"\"\nnew = \"\"\"* Added support for the ``admin_order_field`` attribute on properties in\n  :attr:`.ModelAdmin.list_display`.\n\n* Added the :meth:`.ModelAdmin.get_inlines` hook to allow specifying inlines\n  based on the request or model instance.\n\"\"\"\nassert old in content\ncontent = content.replace(old, new, 1)\nwith open(path, 'w', encoding='utf-8') as f:\n    f.write(content)\nprint(\"done\")\nEOF\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 198,
+            "prompt_tokens": 7551,
+            "total_tokens": 7749,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 7168
+            },
+            "prompt_cache_hit_tokens": 7168,
+            "prompt_cache_miss_tokens": 383
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\ndone\n</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: All changes are complete. Let me do a final verification of the diff.\n\n```bash\ncd /testbed && git diff HEAD --stat && git diff HEAD\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "be502afa-a4e6-4915-a5be-6fe8418c6fef",
+          "created": 1792309735,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: All changes are complete. Let me do a final verification of the diff.\n\n```bash\ncd /testbed && git diff HEAD --stat && git diff HEAD\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 39,
+            "prompt_tokens": 7770,
+            "total_tokens": 7809,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 7552
+            },
+            "prompt_cache_hit_tokens": 7552,
+            "prompt_cache_miss_tokens": 218
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "<returncode>0</returncode>\n<output>\n django/contrib/admin/options.py  |  6 +++++-\n docs/ref/contrib/admin/index.txt | 15 +++++++++++++++\n docs/releases/3.0.txt            |  3 +++\n 3 files changed, 23 insertions(+), 1 deletion(-)\ndiff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex 5e7b23f9a0..fb10a2ed0b 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -580,9 +580,13 @@ class ModelAdmin(BaseModelAdmin):\n     def __str__(self):\n         return \"%s.%s\" % (self.model._meta.app_label, self.__class__.__name__)\n \n+    def get_inlines(self, request, obj):\n+        \"\"\"Hook for specifying custom inlines.\"\"\"\n+        return self.inlines\n+\n     def get_inline_instances(self, request, obj=None):\n         inline_instances = []\n-        for inline_class in self.inlines:\n+        for inline_class in self.get_inlines(request, obj):\n             inline = inline_class(self.model, self.admin_site)\n             if request:\n                 if not (inline.has_view_or_change_permission(request, obj) or\ndiff --git a/docs/ref/contrib/admin/index.txt b/docs/ref/contrib/admin/index.txt\nindex 93679c46fd..49b2b0f3d6 100644\n--- a/docs/ref/contrib/admin/index.txt\n+++ b/docs/ref/contrib/admin/index.txt\n@@ -1608,6 +1608,21 @@ templates used by the :class:`ModelAdmin` views:\n             def get_sortable_by(self, request):\n                 return {*self.get_list_display(request)} - {'rank'}\n \n+.. method:: ModelAdmin.get_inlines(request, obj)\n+\n+    The ``get_inlines`` method is given the ``HttpRequest`` and the\n+    ``obj`` being edited (or ``None`` on an add form) and is expected to return\n+    an iterable of inlines. You can override this method to dynamically add or\n+    remove inlines based on the request or model instance.\n+\n+    For example::\n+\n+        class MyModelAdmin(admin.ModelAdmin):\n+            def get_inlines(self, request, obj):\n+                if request.user.is_superuser:\n+                    return (MyInline,)\n+                return ()\n+\n .. method:: ModelAdmin.get_inline_instances(request, obj=None)\n \n     The ``get_inline_instances`` method is given the ``HttpRequest`` and the\ndiff --git a/docs/releases/3.0.txt b/docs/releases/3.0.txt\nindex d7ad7a8cf7..d0f5186d46 100644\n--- a/docs/releases/3.0.txt\n+++ b/docs/releases/3.0.txt\n@@ -47,6 +47,9 @@ Minor features\n * Added support for the ``admin_order_field`` attribute on properties in\n   :attr:`.ModelAdmin.list_display`.\n \n+* Added the :meth:`.ModelAdmin.get_inlines` hook to allow specifying inlines\n+  based on the request or model instance.\n+\n :mod:`django.contrib.admindocs`\n ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n \n</output>",
+      "extra": {
+        "returncode": 0
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "THOUGHT: All changes are complete and tests pass. I'll submit the final output.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git diff HEAD\n```",
+      "extra": {
+        "response_status": "ok",
+        "response": {
+          "id": "1c9df9e5-91b2-4fdf-b54f-87b8b4a687ec",
+          "created": 1792309737,
+          "model": "deepseek-flash",
+          "object": "chat.completion",
+          "system_fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "THOUGHT: All changes are complete and tests pass. I'll submit the final output.\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git diff HEAD\n```",
+                "role": "assistant",
+                "tool_calls": null,
+                "function_call": null
+              },
+              "provider_specific_fields": {}
+            }
+          ],
+          "usage": {
+            "completion_tokens": 44,
+            "prompt_tokens": 8564,
+            "total_tokens": 8608,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "cached_tokens": 7808
+            },
+            "prompt_cache_hit_tokens": 7808,
+            "prompt_cache_miss_tokens": 756
+          }
+        }
+      }
+    },
+    {
+      "role": "user",
+      "content": "diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py\nindex 5e7b23f9a0..fb10a2ed0b 100644\n--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -580,9 +580,13 @@ class ModelAdmin(BaseModelAdmin):\n     def __str__(self):\n         return \"%s.%s\" % (self.model._meta.app_label, self.__class__.__name__)\n \n+    def get_inlines(self, request, obj):\n+        \"\"\"Hook for specifying custom inlines.\"\"\"\n+        return self.inlines\n+\n     def get_inline_instances(self, request, obj=None):\n         inline_instances = []\n-        for inline_class in self.inlines:\n+        for inline_class in self.get_inlines(request, obj):\n             inline = inline_class(self.model, self.admin_site)\n             if request:\n                 if not (inline.has_view_or_change_permission(request, obj) or\ndiff --git a/docs/ref/contrib/admin/index.txt b/docs/ref/contrib/admin/index.txt\nindex 93679c46fd..49b2b0f3d6 100644\n--- a/docs/ref/contrib/admin/index.txt\n+++ b/docs/ref/contrib/admin/index.txt\n@@ -1608,6 +1608,21 @@ templates used by the :class:`ModelAdmin` views:\n             def get_sortable_by(self, request):\n                 return {*self.get_list_display(request)} - {'rank'}\n \n+.. method:: ModelAdmin.get_inlines(request, obj)\n+\n+    The ``get_inlines`` method is given the ``HttpRequest`` and the\n+    ``obj`` being edited (or ``None`` on an add form) and is expected to return\n+    an iterable of inlines. You can override this method to dynamically add or\n+    remove inlines based on the request or model instance.\n+\n+    For example::\n+\n+        class MyModelAdmin(admin.ModelAdmin):\n+            def get_inlines(self, request, obj):\n+                if request.user.is_superuser:\n+                    return (MyInline,)\n+                return ()\n+\n .. method:: ModelAdmin.get_inline_instances(request, obj=None)\n \n     The ``get_inline_instances`` method is given the ``HttpRequest`` and the\ndiff --git a/docs/releases/3.0.txt b/docs/releases/3.0.txt\nindex d7ad7a8cf7..d0f5186d46 100644\n--- a/docs/releases/3.0.txt\n+++ b/docs/releases/3.0.txt\n@@ -47,6 +47,9 @@ Minor features\n * Added support for the ``admin_order_field`` attribute on properties in\n   :attr:`.ModelAdmin.list_display`.\n \n+* Added the :meth:`.ModelAdmin.get_inlines` hook to allow specifying inlines\n+  based on the request or model instance.\n+\n :mod:`django.contrib.admindocs`\n ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n \n"
+    }
+  ],
+  "trajectory_format": "mini-swe-agent-1",
+  "instance_id": "django__django-11095",
+  "run_id": "082394572c524e46abadaccfd14afd4a"
+}

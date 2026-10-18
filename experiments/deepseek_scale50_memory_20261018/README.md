@@ -1,7 +1,7 @@
 # DeepSeek 50 题记忆对照（开启组）
 
-`deepseek_scale50_20261018` 是 50 题关闭记忆的基线组（`deepseek/deepseek-chat`、400 步、
-每题 10 美元、4 worker，由用户启动）。本目录是配对的**开启组**：`on.yaml` 与基线 yaml
+`deepseek_scale50_20261018/baseline_r2` 是完整评分后的关闭记忆组（`deepseek/deepseek-chat`、
+400 步、每题 10 美元、4 worker；官方结果 42/50、0 空补丁）。本目录是配对的**开启组**：`on.yaml` 与基线 yaml
 仅 `enable_memory: true` + `memory_max_messages: 40` 不同（gemini 渠道今晨反复故障后
 改用 deepseek 路线；fix5 gemini 五题对照保留作过程记录）。
 
