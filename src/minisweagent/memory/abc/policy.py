@@ -1,4 +1,4 @@
-"""The three pre-registered prompt policies: window, summary, summary+search.
+"""The prompt policies: window, summary, summary+search, and the optional full arm.
 
 Every policy builds one ``PromptView`` from the full transcript.  The invariants
 are enforced in one place:
@@ -134,6 +134,14 @@ def _fit_latest(segment: Segment, available: int) -> _Latest:
     )
 
 
+def _as_segment(latest: _Latest) -> Segment | None:
+    """Represent the latest turn as a Segment for the invalidation pass."""
+    if not latest.messages:
+        return None
+    kind = "turn" if latest.messages[0].get("role") == "assistant" else "loose"
+    return Segment(kind=kind, indices=latest.indices, messages=tuple(latest.messages))
+
+
 def _retrieval_tokens(message: dict[str, Any]) -> int:
     extra = message.get("extra")
     if not isinstance(extra, dict):
@@ -143,7 +151,7 @@ def _retrieval_tokens(message: dict[str, Any]) -> int:
 
 
 class MemoryPolicy:
-    """Base class for the three policies."""
+    """Base class for the memory policies."""
 
     name = "base"
     include_summary = False
@@ -161,13 +169,25 @@ class MemoryPolicy:
         pinned = [messages[index] for index in indices]
         return pinned, indices, estimate_tokens(pinned)
 
-    def _summary(self, segments: list[Segment], conversation: Conversation, cap: int) -> EvidenceSummary:
+    def _summary(
+        self,
+        segments: list[Segment],
+        conversation: Conversation,
+        cap: int,
+        *,
+        later_segments: list[Segment] | tuple[Segment, ...] = (),
+    ) -> EvidenceSummary:
         if not self.include_summary or cap <= 0 or not segments:
             return EvidenceSummary(text="", tokens=0, turns=0)
         text_cap = cap - MESSAGE_OVERHEAD_TOKENS
         if text_cap <= 0:
             return EvidenceSummary(text="", tokens=0, turns=0)
-        return build_evidence_summary(segments, conversation.steps, token_limit=text_cap)
+        return build_evidence_summary(
+            segments,
+            conversation.steps,
+            token_limit=text_cap,
+            later_segments=later_segments,
+        )
 
     def _assemble(
         self,
@@ -290,9 +310,18 @@ class SummaryPolicy(MemoryPolicy):
         kept: list[Segment] = []
         used = 0
         summary = EvidenceSummary(text="", tokens=0, turns=0)
+        latest_segment = _as_segment(latest)
+
+        def later_from(index: int) -> list[Segment]:
+            return list(older[index:]) + ([latest_segment] if latest_segment is not None else [])
 
         for index in range(len(older) - 1, -1, -1):
-            candidate_summary = self._summary(older[:index], conversation, summary_cap)
+            candidate_summary = self._summary(
+                older[:index],
+                conversation,
+                summary_cap,
+                later_segments=later_from(index),
+            )
             candidate_used = used + older[index].tokens
             candidate_total = pinned_tokens + latest.tokens + candidate_summary.tokens + MESSAGE_OVERHEAD_TOKENS * bool(candidate_summary.text) + candidate_used
             if candidate_total <= self.limits.total_tokens:
@@ -303,7 +332,12 @@ class SummaryPolicy(MemoryPolicy):
                 break
 
         if not kept:
-            summary = self._summary(older, conversation, summary_cap)
+            summary = self._summary(
+                older,
+                conversation,
+                summary_cap,
+                later_segments=[latest_segment] if latest_segment is not None else [],
+            )
         # If the summary was dropped by the cap, recompute with no summary so the
         # view remains legal; this only happens for pathological component limits.
         if pinned_tokens + latest.tokens + used + (summary.tokens + MESSAGE_OVERHEAD_TOKENS if summary.text else 0) > self.limits.total_tokens:
@@ -364,11 +398,49 @@ class SummarySearchPolicy(SummaryPolicy):
     name = "summary_search"
 
 
+class FullPolicy(MemoryPolicy):
+    """No compression: send the complete transcript.
+
+    This is not part of the pre-registered A/B/C contrast.  It exists for a
+    separate product question ("is compression worth it at all?") and therefore
+    deliberately does not enforce ``total_tokens``.  The trace records
+    ``budget_enforced=false`` so an analysis cannot mistake it for a budget
+    violation.
+    """
+
+    name = "full"
+    enforces_budget = False
+
+    def build(self, messages: list[dict[str, Any]]) -> PromptView:
+        conversation = parse_conversation(messages)
+        pinned_indices = tuple(sorted(set(conversation.system_indices + (conversation.task_index,))))
+        pinned = [messages[index] for index in pinned_indices]
+        sent_indices = tuple(range(len(messages)))
+        return PromptView(
+            messages=list(messages),
+            policy=self.name,
+            total_tokens=estimate_tokens(messages),
+            pinned_tokens=estimate_tokens(pinned),
+            summary_tokens=0,
+            retrieval_tokens=0,
+            max_retrieval_tokens=0,
+            sent_indices=sent_indices,
+            dropped_indices=(),
+            summary_text="",
+            task_index=conversation.task_index,
+            task_present=True,
+            summary_present=False,
+            clipped=False,
+            budget_enforced=False,
+        )
+
+
 def build_policy(name: str, limits: PolicyLimits | None = None) -> MemoryPolicy:
     policies = {
         "window": WindowPolicy,
         "summary": SummaryPolicy,
         "summary_search": SummarySearchPolicy,
+        "full": FullPolicy,
     }
     try:
         return policies[name](limits)

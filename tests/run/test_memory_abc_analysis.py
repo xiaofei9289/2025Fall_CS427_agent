@@ -131,6 +131,10 @@ def test_report_has_c_minus_b_primary_and_all_tasks(tmp_path):
     report = analysis.build_report(study)
     assert report["valid"] is True
     assert report["arms"]["c"]["resolved"] == 3
+    assert report["arms"]["a"]["estimated_prompt_tokens"] == 5000
+    assert report["arms"]["a"]["actual_prompt_tokens"] == 6000
+    assert report["arms"]["a"]["actual_prompt_tokens_per_call"] == 1200
+    assert "Mechanism metrics" in (study / "comparison.md").read_text()
     assert report["estimator"]["a"]["samples"] == 5
     assert report["estimator"]["a"]["median_ratio"] == 1.2
     assert "C-B (history search beyond the same summary)" in report["contrasts"]
@@ -253,3 +257,70 @@ def test_multi_round_report_pools_task_rates(tmp_path):
     assert (study / "comparison_all_rounds.md").is_file()
     assert (study / "comparison_r1.md").is_file()
     assert (study / "comparison_r2.md").is_file()
+
+
+def _valid_trajectory(task: str) -> dict:
+    def action(path: str) -> dict:
+        return {
+            "role": "assistant",
+            "content": f'```tool\n{{"name": "read_file", "args": {{"path": "{path}"}}}}\n```',
+            "extra": {"response": {"usage": {"prompt_tokens": 100, "completion_tokens": 10}}},
+        }
+
+    def observation(text: str) -> dict:
+        return {
+            "role": "user",
+            "content": f"<returncode>0</returncode><output>{text}</output>",
+            "extra": {"kind": "observation", "returncode": 0},
+        }
+
+    return {
+        "instance_id": task,
+        "info": {"model_stats": {"instance_cost": 0.01, "api_calls": 2}, "exit_status": "Submitted"},
+        "messages": [
+            {"role": "system", "content": "system", "extra": {"kind": "system"}},
+            {"role": "user", "content": "task", "extra": {"kind": "task"}},
+            action("src/a.py"),
+            observation("A"),
+            action("src/a.py"),
+            observation("A again"),
+        ],
+    }
+
+
+def test_report_populates_replay_metrics_for_a_real_transcript(tmp_path):
+    outcomes = {
+        "t1": {"a": True, "b": True, "c": True},
+        "t2": {"a": True, "b": False, "c": False},
+        "t3": {"a": False, "b": True, "c": True},
+        "t4": {"a": False, "b": False, "c": True},
+        "t5": {"a": False, "b": False, "c": False},
+    }
+    study = make_study(tmp_path / "study", outcomes)
+    for arm in POLICIES:
+        (study / arm / "t1" / "t1.traj.json").write_text(json.dumps(_valid_trajectory("t1")))
+    report = analysis.build_report(study)
+    assert report["arms"]["a"]["read_events"] == 2
+    assert report["arms"]["a"]["repeat_reads"] == 1
+    assert report["arms"]["a"]["recovery_reads"] == 0
+    assert report["per_task"]["t1"]["a"]["read_events"] == 2
+    assert "Recovery re-reads" in (study / "comparison.md").read_text()
+
+
+def test_unenforced_full_budget_is_not_a_violation(tmp_path):
+    outcomes = {
+        "t1": {"a": True, "b": True, "c": True},
+        "t2": {"a": True, "b": False, "c": False},
+        "t3": {"a": False, "b": True, "c": True},
+        "t4": {"a": False, "b": False, "c": True},
+        "t5": {"a": False, "b": False, "c": False},
+    }
+    study = make_study(tmp_path / "study", outcomes)
+    trace_path = study / "b" / "t1" / "memory_trace.jsonl"
+    record = json.loads(trace_path.read_text().splitlines()[0])
+    record["budget"] = 9000
+    record["budget_enforced"] = False
+    trace_path.write_text(json.dumps(record) + "\n")
+    report = analysis.build_report(study)
+    assert "total_over_budget" not in report["per_task"]["t1"]["b"]["violations"]
+    assert report["valid"] is True

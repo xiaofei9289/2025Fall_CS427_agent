@@ -127,3 +127,49 @@ def test_dropped_messages_are_not_in_the_sent_indices():
     assert set(view.sent_indices).isdisjoint(view.dropped_indices)
     assert len(view.sent_indices) + len(view.dropped_indices) == len(messages)
     assert estimate_tokens(view.messages) == view.total_tokens
+
+
+def test_summary_is_invalidated_by_a_write_in_the_retained_window():
+    def message(action, observation):
+        return [
+            {"role": "assistant", "content": action},
+            {
+                "role": "user",
+                "content": f"<returncode>0</returncode><output>{observation}{'x' * 80}</output>",
+                "extra": {"kind": "observation", "returncode": 0},
+            },
+        ]
+
+    messages = [
+        {"role": "system", "content": "SYSTEM", "extra": {"kind": "system"}},
+        {"role": "user", "content": "TASK", "extra": {"kind": "task"}},
+    ]
+    messages += message("```bash\ncat src/config.py\n```", "OLD_SOURCE")
+    for index in range(4):
+        messages += message(f"```bash\ncat src/f{index}.py\n```", f"filler {index}")
+    messages += message("```bash\nsed -i 's/a/b/' src/config.py\n```", "edited")
+    for index in range(2):
+        messages += message(f"```bash\ncat src/g{index}.py\n```", f"tail {index}")
+
+    view = build_policy(
+        "summary",
+        PolicyLimits(total_tokens=300, summary_tokens=120, retrieval_tokens=60),
+    ).build(messages)
+    assert "OLD_SOURCE" not in view.summary_text
+    assert "Superseded by later edits:" in view.summary_text
+    assert "modified src/config.py after the summarized read" in view.summary_text
+
+
+def test_full_policy_sends_every_message_and_does_not_enforce_the_budget():
+    messages = transcript()
+    view = build_policy(
+        "full",
+        PolicyLimits(total_tokens=100, summary_tokens=10, retrieval_tokens=10),
+    ).build(messages)
+    assert view.policy == "full"
+    assert view.sent_indices == tuple(range(len(messages)))
+    assert view.dropped_indices == ()
+    assert view.total_tokens == estimate_tokens(messages)
+    assert view.total_tokens > 100
+    assert view.budget_enforced is False
+    assert view.summary_present is False

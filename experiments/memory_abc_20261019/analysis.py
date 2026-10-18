@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any
 
 from minisweagent.memory.abc.budget import DEFAULT_RETRIEVAL_TOKENS, DEFAULT_SUMMARY_TOKENS, DEFAULT_TOTAL_TOKENS
+from minisweagent.memory.abc.policy import PolicyLimits, build_policy
+from minisweagent.memory.abc.replay import replay_transcript
 from minisweagent.memory.abc.stats import PairedResult, paired_result
 
 _TOOL_RE = re.compile(r"```tool\n(.*?)\n```", re.DOTALL)
@@ -50,6 +52,18 @@ class TaskMetrics:
     summary_calls: int = 0
     retrieval_calls: int = 0
     search_calls: int = 0
+    prompt_tokens_est: int = 0
+    prompt_tokens_actual: int = 0
+    completion_tokens_actual: int = 0
+    actual_prompt_samples: int = 0
+    read_events: int = 0
+    repeat_reads: int = 0
+    recovery_reads: int = 0
+    summary_recovery_reads: int = 0
+    lost_recovery_reads: int = 0
+    read_exposures: int = 0
+    lost_read_exposures: int = 0
+    replay_errors: int = 0
     violations: list[str] = field(default_factory=list)
 
     @property
@@ -72,6 +86,18 @@ class ArmMetrics:
     retrieval_calls: int
     search_calls: int
     violations: int
+    prompt_tokens_est: int = 0
+    prompt_tokens_actual: int = 0
+    completion_tokens_actual: int = 0
+    actual_prompt_samples: int = 0
+    read_events: int = 0
+    repeat_reads: int = 0
+    recovery_reads: int = 0
+    summary_recovery_reads: int = 0
+    lost_recovery_reads: int = 0
+    read_exposures: int = 0
+    lost_read_exposures: int = 0
+    replay_errors: int = 0
     source: str = ""
     policy: str = ""
 
@@ -91,6 +117,26 @@ class ArmMetrics:
             "budget_violations": self.violations,
             "source_sha256": self.source,
             "policy": self.policy,
+            "estimated_prompt_tokens": self.prompt_tokens_est,
+            "estimated_prompt_tokens_per_call": round(self.prompt_tokens_est / self.api_calls, 1)
+            if self.api_calls
+            else 0.0,
+            "actual_prompt_tokens": self.prompt_tokens_actual,
+            "actual_prompt_tokens_per_call": round(self.prompt_tokens_actual / self.actual_prompt_samples, 1)
+            if self.actual_prompt_samples
+            else None,
+            "completion_tokens": self.completion_tokens_actual,
+            "read_events": self.read_events,
+            "repeat_reads": self.repeat_reads,
+            "recovery_reads": self.recovery_reads,
+            "summary_recovery_reads": self.summary_recovery_reads,
+            "lost_recovery_reads": self.lost_recovery_reads,
+            "read_exposures": self.read_exposures,
+            "lost_read_exposures": self.lost_read_exposures,
+            "lost_read_exposure_rate": round(self.lost_read_exposures / self.read_exposures, 3)
+            if self.read_exposures
+            else None,
+            "replay_errors": self.replay_errors,
         }
 
 
@@ -150,8 +196,30 @@ def _search_calls(trajectory: Path) -> int:
     return calls
 
 
+def _policy_for_manifest(manifest: dict[str, Any]):
+    """Build the arm's policy for offline replay; None if the manifest is unusable."""
+    agent = manifest.get("config", {}).get("agent", {})
+    try:
+        return build_policy(
+            str(agent.get("memory_policy", "")),
+            PolicyLimits(
+                total_tokens=int(agent.get("memory_total_tokens", DEFAULT_TOTAL_TOKENS)),
+                summary_tokens=int(agent.get("memory_summary_tokens", DEFAULT_SUMMARY_TOKENS)),
+                retrieval_tokens=int(agent.get("memory_retrieval_tokens", DEFAULT_RETRIEVAL_TOKENS)),
+            ),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def load_arm_metrics(arm_dir: Path) -> tuple[dict[str, TaskMetrics], ArmMetrics]:
-    """Read one arm's traces, trajectories, and official grading summary."""
+    """Read one arm's traces, trajectories, and official grading summary.
+
+    In addition to outcome and budget metrics, every task is replayed offline
+    through its own policy.  The replay supplies deterministic mechanism
+    counters (read events, recovery re-reads, lost read exposures) without any
+    model or environment call.
+    """
     manifest = _load_json(arm_dir / "run_manifest.json")
     tasks = list(manifest["instance_ids"])
     grading_path = arm_dir / "evaluation" / "grading_summary.json"
@@ -160,15 +228,17 @@ def load_arm_metrics(arm_dir: Path) -> tuple[dict[str, TaskMetrics], ArmMetrics]
     empty_ids = set(grading.get("empty_patch_ids", []))
     error_ids = set(grading.get("error_ids", []))
     completed_ids = set(grading.get("completed_ids", []))
+    policy = _policy_for_manifest(manifest)
 
     rows: dict[str, TaskMetrics] = {}
     for task in tasks:
         task_dir = arm_dir / task
         trace = _read_trace(task_dir / "memory_trace.jsonl")
         trajectory = task_dir / f"{task}.traj.json"
-        info: dict[str, Any] = {}
+        trajectory_data: dict[str, Any] = {}
         if trajectory.is_file():
-            info = _load_json(trajectory).get("info", {})
+            trajectory_data = _load_json(trajectory)
+        info = trajectory_data.get("info", {})
         stats = info.get("model_stats", {})
         outer_exit = str(info.get("exit_status") or "")
         agent_exit = str(info.get("agent_exit_status") or outer_exit)
@@ -207,14 +277,44 @@ def load_arm_metrics(arm_dir: Path) -> tuple[dict[str, TaskMetrics], ArmMetrics]
             )
             row.summary_calls += int(bool(record.get("summary_present")))
             row.retrieval_calls += int(int(record.get("retrieval_tokens", 0)) > 0)
+            row.prompt_tokens_est += int(record.get("budget", 0))
             if not record.get("task_present", False):
                 row.violations.append("task_missing")
-            if int(record.get("budget", 0)) > DEFAULT_TOTAL_TOKENS:
+            budget_enforced = bool(record.get("budget_enforced", True))
+            if budget_enforced and int(record.get("budget", 0)) > DEFAULT_TOTAL_TOKENS:
                 row.violations.append("total_over_budget")
             if int(record.get("summary_tokens", 0)) > DEFAULT_SUMMARY_TOKENS:
                 row.violations.append("summary_over_budget")
             if int(record.get("max_retrieval_tokens", record.get("retrieval_tokens", 0))) > DEFAULT_RETRIEVAL_TOKENS:
                 row.violations.append("retrieval_over_budget")
+
+        for message in trajectory_data.get("messages", []):
+            if message.get("role") != "assistant":
+                continue
+            usage = (message.get("extra") or {}).get("response", {}).get("usage") or {}
+            prompt = int(usage.get("prompt_tokens") or 0)
+            completion = int(usage.get("completion_tokens") or 0)
+            if prompt:
+                row.prompt_tokens_actual += prompt
+                row.actual_prompt_samples += 1
+            if completion:
+                row.completion_tokens_actual += completion
+
+        if policy is not None and trajectory_data:
+            try:
+                replay = replay_transcript(trajectory_data.get("messages", []), policy)
+            except Exception:  # noqa: BLE001 - replay is diagnostic, not a run
+                row.replay_errors += 1
+            else:
+                row.read_events = replay.read_events
+                row.repeat_reads = replay.repeat_reads
+                row.recovery_reads = replay.recovery_reads
+                row.summary_recovery_reads = replay.summary_recovery_reads
+                row.lost_recovery_reads = replay.lost_recovery_reads
+                row.read_exposures = replay.read_exposures
+                row.lost_read_exposures = replay.lost_read_exposures
+                row.replay_errors += replay.view_errors
+
         row.violations = sorted(set(row.violations))
         rows[task] = row
 
@@ -232,6 +332,18 @@ def load_arm_metrics(arm_dir: Path) -> tuple[dict[str, TaskMetrics], ArmMetrics]
         retrieval_calls=sum(row.retrieval_calls for row in rows.values()),
         search_calls=sum(row.search_calls for row in rows.values()),
         violations=sum(bool(row.violations) for row in rows.values()),
+        prompt_tokens_est=sum(row.prompt_tokens_est for row in rows.values()),
+        prompt_tokens_actual=sum(row.prompt_tokens_actual for row in rows.values()),
+        completion_tokens_actual=sum(row.completion_tokens_actual for row in rows.values()),
+        actual_prompt_samples=sum(row.actual_prompt_samples for row in rows.values()),
+        read_events=sum(row.read_events for row in rows.values()),
+        repeat_reads=sum(row.repeat_reads for row in rows.values()),
+        recovery_reads=sum(row.recovery_reads for row in rows.values()),
+        summary_recovery_reads=sum(row.summary_recovery_reads for row in rows.values()),
+        lost_recovery_reads=sum(row.lost_recovery_reads for row in rows.values()),
+        read_exposures=sum(row.read_exposures for row in rows.values()),
+        lost_read_exposures=sum(row.lost_read_exposures for row in rows.values()),
+        replay_errors=sum(row.replay_errors for row in rows.values()),
         source=str(manifest.get("source", {}).get("sha256", "")),
         policy=str(manifest.get("config", {}).get("agent", {}).get("memory_policy", "")),
     )
@@ -403,6 +515,15 @@ def build_report(study: Path, arms: dict[str, str] | None = None, *, suffix: str
                     "max_total": rows[arm][task].max_total,
                     "max_summary": rows[arm][task].max_summary,
                     "max_retrieval": rows[arm][task].max_retrieval,
+                    "prompt_tokens_est": rows[arm][task].prompt_tokens_est,
+                    "prompt_tokens_actual": rows[arm][task].prompt_tokens_actual,
+                    "read_events": rows[arm][task].read_events,
+                    "repeat_reads": rows[arm][task].repeat_reads,
+                    "summary_recovery_reads": rows[arm][task].summary_recovery_reads,
+                    "recovery_reads": rows[arm][task].recovery_reads,
+                    "lost_recovery_reads": rows[arm][task].lost_recovery_reads,
+                    "lost_read_exposures": rows[arm][task].lost_read_exposures,
+                    "replay_errors": rows[arm][task].replay_errors,
                     "violations": rows[arm][task].violations,
                 }
                 for arm in arms
@@ -471,6 +592,36 @@ def _render_markdown(
         )
     lines += [
         "",
+        "## Mechanism metrics (offline replay)",
+        "",
+        "| Arm | Est. prompt tokens/call | Actual prompt tokens/call | Read events | Repeat reads | Recovery re-reads | Summary recovery | Lost recovery | Lost read exposures | Lost exposure rate | Replay errors |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for arm in arms:
+        metric = metrics[arm]
+        est_per_call = round(metric.prompt_tokens_est / metric.api_calls, 1) if metric.api_calls else "n/a"
+        actual_per_call = (
+            round(metric.prompt_tokens_actual / metric.actual_prompt_samples, 1)
+            if metric.actual_prompt_samples
+            else "n/a"
+        )
+        exposure_rate = (
+            f"{metric.lost_read_exposures / metric.read_exposures:.3f}" if metric.read_exposures else "n/a"
+        )
+        lines.append(
+            f"| {arm} | {est_per_call} | {actual_per_call} | {metric.read_events} | "
+            f"{metric.repeat_reads} | {metric.recovery_reads} | {metric.summary_recovery_reads} | "
+            f"{metric.lost_recovery_reads} | {metric.lost_read_exposures} | {exposure_rate} | "
+            f"{metric.replay_errors} |"
+        )
+    lines += [
+        "",
+        "`Recovery re-reads` count a successful re-read of a path whose previous read was not fully visible",
+        "in the prompt and where no write to that path intervened.  `Lost read exposures` count read",
+        "observations that were current (no later write) but absent from the prompt at the next read.",
+        "These are deterministic proxies from the transcript, not causal error labels; replay errors mean a",
+        "trajectory could not be parsed and are reported rather than hidden.",
+        "",
         "## Pre-registered contrast",
         "",
         "| Contrast | Gained | Lost | Difference | 95% CI | McNemar p | Bound tasks | Never-bound | Placebo mismatches |",
@@ -510,8 +661,8 @@ def _render_markdown(
         "Tasks marked `*` are pilot tasks; they are excluded from the table above but shown here for completeness.",
         "Each cell is `arm=value`.",
         "",
-        "| Task | Resolved | Dropped calls | Summary calls | Search calls | Max tokens | Violations |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Task | Resolved | Dropped calls | Summary calls | Search calls | Max tokens | Repeat reads | Recovery re-reads | Violations |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for task in report["per_task"]:
         row = report["per_task"][task]
@@ -520,11 +671,13 @@ def _render_markdown(
         summary = " ".join(f"{arm}={row[arm]['summary_calls']}" for arm in arms)
         search = " ".join(f"{arm}={row[arm]['search_calls']}" for arm in arms)
         totals = " ".join(f"{arm}={row[arm]['max_total']}" for arm in arms)
+        repeats = " ".join(f"{arm}={row[arm]['repeat_reads']}" for arm in arms)
+        recoveries = " ".join(f"{arm}={row[arm]['recovery_reads']}" for arm in arms)
         violations = sorted({v for arm in arms for v in row[arm]["violations"]})
         label = task + ("*" if task in pilot else "")
         lines.append(
-            f"| {label} | {resolved} | {dropped} | {summary} | {search} | {totals} | "
-            f"{', '.join(violations) or '-'} |"
+            f"| {label} | {resolved} | {dropped} | {summary} | {search} | {totals} | {repeats} | "
+            f"{recoveries} | {', '.join(violations) or '-'} |"
         )
     lines += [
         "",

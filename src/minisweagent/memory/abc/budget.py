@@ -75,6 +75,7 @@ class PromptView:
     task_present: bool
     summary_present: bool
     clipped: bool
+    budget_enforced: bool = True
 
     def metadata(self) -> dict[str, Any]:
         """Compact record stored on each assistant message for later analysis."""
@@ -90,6 +91,7 @@ class PromptView:
             "summary_present": self.summary_present,
             "task_present": self.task_present,
             "clipped": self.clipped,
+            "budget_enforced": self.budget_enforced,
         }
 
 
