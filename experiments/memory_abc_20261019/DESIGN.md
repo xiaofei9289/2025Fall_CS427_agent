@@ -21,10 +21,10 @@
 | 保留任务 | 是 | 是 | 是 |
 | 历史单位 | 完整 turn | 完整 turn | 完整 turn |
 | 超限后 | 丢最旧完整 turn | 丢最旧完整 turn，保留证据摘要 | 同 B |
-| `memory_search` | 无 | 无 | 有，仅当前 run；另含 C-only 调用条件说明 |
+| `memory_search` | 无 | 无 | 有，仅当前 run；C-only 调用说明；首次写/提交前至少一次 gate |
 | 其他工具 | 相同 | 相同 | 相同 |
 
-配置文件在 `configs/base.yaml` + `configs/{a,b,c}.yaml`。每个 arm 文件**只能**设置 `agent.memory_policy`，`study_config.py` 会拒绝任何其他覆盖。`memory_search` 不在 `enabled_tools` 里，由 C 的 policy 安装；C 的 policy 还会在 system prompt 末尾追加一段“何时调用 memory_search”的说明。这是 C treatment 的一部分，A/B 不包含。
+配置文件在 `configs/base.yaml` + `configs/{a,b,c}.yaml`。每个 arm 文件**只能**设置 `agent.memory_policy`，`study_config.py` 会拒绝任何其他覆盖。`memory_search` 不在 `enabled_tools` 里，由 C 的 policy 安装；C 的 policy 还会在 system prompt 末尾追加一段“何时调用 memory_search”的说明，并在第一次写文件或提交前要求至少一次检索。这两项都是 C treatment 的一部分，A/B 不包含；用 `MSWEA_MEMORY_SEARCH_GATE=0` 可关闭 gate，做自然 C 的敏感性检查。
 
 ## 3. 固定条件
 

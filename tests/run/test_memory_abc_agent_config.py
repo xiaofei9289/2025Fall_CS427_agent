@@ -59,7 +59,13 @@ class FakeEnv:
 def run_arm(tmp_path, arm):
     agent_config = dict(study_config.load_arm(arm)["agent"])
     agent_config["memory_trace_path"] = str(tmp_path / f"{arm}.jsonl")
-    model = FakeModel([f"```bash\ncat src/file{index}.py\n```" for index in range(35)])
+    responses = [f"```bash\ncat src/file{index}.py\n```" for index in range(35)]
+    if arm == "c":
+        responses.insert(
+            0,
+            '```tool\n{"name": "memory_search", "args": {"query": "UNIQUE_TASK_MARKER"}}\n```',
+        )
+    model = FakeModel(responses)
     agent = MemoryAgent(model, FakeEnv(), **agent_config)
     status, _ = agent.run(TASK)
     assert status == "Submitted"

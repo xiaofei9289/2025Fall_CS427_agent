@@ -10,6 +10,7 @@ per-task JSONL trace so the report can audit the budget after the run.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -132,6 +133,11 @@ class MemoryAgent(DefaultAgent):
                 token_limit=self.config.memory_retrieval_tokens,
             )
         self.retrieval_gate = set()
+        self.search_calls = 0
+        self.search_gate = (
+            self.config.memory_policy == "summary_search"
+            and os.environ.get("MSWEA_MEMORY_SEARCH_GATE", "1") != "0"
+        )
         self.extra_template_vars["tool_specs"] = [tool_spec(tool) for tool in self.tools.values()]
         if self.config.memory_policy == "summary_search":
             # The tool description alone did not change behaviour in the p2c
@@ -159,6 +165,26 @@ class MemoryAgent(DefaultAgent):
             except TerminatingException as error:
                 self.add_message("user", str(error), extra={"kind": "terminal"})
                 return type(error).__name__, str(error)
+
+    def execute_action(self, action: dict) -> dict:
+        if self.search_gate and not self.search_calls:
+            tool_name = action.get("tool_name", "")
+            command = action.get("action") or ""
+            write_like = (
+                action.get("kind") == "tool" and tool_name in {"replace", "write_file"}
+            ) or (action.get("kind") == "bash" and "COMPLETE_TASK" in command)
+            if write_like:
+                return {
+                    "output": (
+                        "Before editing or submitting, call memory_search for the file or "
+                        "error you need; it can reopen earlier transcript content. Then continue."
+                    ),
+                    "returncode": 1,
+                }
+        output = super().execute_action(action)
+        if action.get("kind") == "tool" and action.get("tool_name") == "memory_search":
+            self.search_calls += 1
+        return output
 
     def query(self) -> dict:
         self.check_budget()

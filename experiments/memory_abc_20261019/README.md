@@ -4,7 +4,7 @@ A clean implementation of the pre-registered comparison in [DESIGN.md](DESIGN.md
 
 - **A (`window`)**: system + task + newest complete turns that fit.
 - **B (`summary`)**: the same window plus a bounded deterministic evidence summary of dropped turns.
-- **C (`summary_search`)**: B's prompt policy plus `memory_search` over this run's transcript and a C-only instruction to call it when earlier evidence is no longer visible.
+- **C (`summary_search`)**: B's prompt policy plus `memory_search`, a C-only instruction, and a gate that requires one search before the first write or submission. Set `MSWEA_MEMORY_SEARCH_GATE=0` for the natural-C ablation.
 
 All arms share one 8000 estimated-token prompt budget, one task set, one model, one prompt, the same ordinary tools, 400 steps, and $10 per task. The summary is capped at 1000; a single retrieval result is capped at 1500. The summary and retrieval results are inside the 8000, not extra.
 

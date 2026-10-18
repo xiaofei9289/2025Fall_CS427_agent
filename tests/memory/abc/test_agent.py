@@ -134,6 +134,17 @@ def test_window_and_summary_have_no_search_tool(tmp_path):
         assert "call the memory_search tool" not in agent.config.system_template
 
 
+def test_search_gate_blocks_submission_until_a_search(tmp_path):
+    submit = "```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"
+    search = '```tool\n{"name": "memory_search", "args": {"query": "OBSERVATION"}}\n```'
+    model = FakeModel([submit, search, submit])
+    agent = MemoryAgent(model, FakeEnv(), **config(tmp_path, "summary_search").__dict__)
+    status, message = agent.run("fix the parser")
+    assert status == "Submitted", message
+    assert agent.search_calls == 1
+    assert any("Before editing or submitting" in str(m.get("content", "")) for m in agent.messages)
+
+
 def test_oversized_model_response_does_not_terminate(tmp_path):
     huge = "<｜｜DSML｜｜ calls>" + "A" * 20000
     model = FakeModel([huge, "```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"])
