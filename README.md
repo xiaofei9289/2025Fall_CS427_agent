@@ -7,11 +7,11 @@ This repository extends [mini-swe-agent](https://github.com/SWE-agent/mini-swe-a
 ## Contents
 
 - `src/minisweagent/`: the agent, environments, models, and the course extensions for tools and memory
-- Tools: `read_file`, `write_file`, `refined_read_file`, `read_many_files`, `search_file_content`, `replace`, `find_definition`, `todo`
+- Tools: `read_file`, `write_file`, `refined_read_file`, `read_many_files`, `search_file_content`, `replace`, `find_definition`, `find_references`, `todo`
 - Memory: `HistoryManager` keeps the task and complete recent action/observation turns, and summarizes omitted execution evidence; `memory_search` returns full matching messages or opens one by index; `SessionMemory` and `TrajectoryReplayer` store and replay runs
-- Retrieval: environment-side Python AST indexing with BM25/symbol search (`code_search`, `repo_map`); `find_definition` uses the same index for exact symbol lookup
+- Retrieval: environment-side Python AST indexing with BM25/symbol search (`code_search`, `repo_map`) and a budgeted snippet tool (`code_context`); a deterministic issue-aware `repo_brief` injects candidate paths/symbols before the first action; `find_references` adds a lightweight call/import/base scan; the large-repo index is cached across tool calls, and `find_definition` uses the same index for exact symbol lookup. See [retrieval design](docs/retrieval.md).
 - Service: persistent FastAPI task queue, per-task Git workspaces, cancellation/resume, checkpoints, budget finalization, event traces, independent tests and candidate patches saved before verification
-- Evaluation: frozen task/config/source manifests, per-run integrity audits and matched baseline/retrieval and [budget finalization comparisons](experiments/budget_20261017)
+- Evaluation: frozen task/config/source manifests, per-run integrity audits and matched baseline/retrieval and [budget finalization comparisons](experiments/budget_20261017); offline localization sets cover [5 verified cases](experiments/localization_verified5) and [50 verified cases](experiments/localization_verified50); [retrieval attribution](experiments/gate-20261017/retrieval_audit.md) separates retrieval misses from read/edit/test failures
 - `deliverables_midterm/`, `deliverables_final/`: SWE-bench run results and reports
 - `tests/`: tests for tools, memory, and the run flow
 
@@ -91,12 +91,15 @@ pytest -q -m slow    # Docker/Singularity, terminal, and Hugging Face network te
 python scripts/verify_v2_baseline.py  # import, tools, config, and offline tests
 ```
 
-Run the scoped checks on the desktop using the [deployment guide](deployment/README.md). Latest V2 local validation: 567 passed, 19 skipped, 50 slow tests deselected; Ruff and the HTTP/Docker demo with finalization events and API restart passed previously. See [validation records](desktop_validation/README.md). Some upstream tests require external model services or Docker and are not part of the offline regression suite.
+Run the scoped checks on the desktop using the [deployment guide](deployment/README.md). Latest local validation: 683 passed, 19 skipped, 51 slow tests deselected; Ruff and the HTTP/Docker demo with finalization events and API restart passed previously. See [validation records](desktop_validation/README.md). Some upstream tests require external model services or Docker and are not part of the offline regression suite.
 
 ## Documentation
 
 - Tool extension: `cs427_tools_extension.md`
 - Memory extension: `cs427_memory.md`
+- Test-driven repair workflow: [docs/repair_workflow.md](docs/repair_workflow.md)
+- Retrieval design: [docs/retrieval.md](docs/retrieval.md)
+- Retrieval experiment arms: [experiments/configs/README.md](experiments/configs/README.md)
 - V2 reproducible baseline: [docs/v2_baseline.md](docs/v2_baseline.md)
 - Delivery and interview notes: [project delivery](docs/project_delivery.md)
 - Controlled experiment plan: [experiments/PLAN.md](experiments/PLAN.md)

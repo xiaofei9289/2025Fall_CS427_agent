@@ -5,6 +5,23 @@
 400 步、每题 10 美元、无 300 秒墙、4 workers；`baseline.yaml` 与 `retrieval.yaml` 只差
 retrieval 工具和对应提示词。
 
+## 2026-10-18 设计修订（未运行）
+
+旧 `retrieval.yaml` 同时改变了三件事：工具、提示词，以及由 `enabled_tools` 自动开启的
+`retrieval_gate`（第一个动作必须是检索）。因此旧配置不是干净的“工具可用性”对照，不能把
+差异单独归因于 `code_search`/`repo_map`。启动 retrieval 臂前先决定 estimand，使用拆分后的配置：
+
+| Arm | 配置 | 变化 |
+| --- | --- | --- |
+| A | `baseline.yaml` | 无 brief、无 BM25 工具、无 gate |
+| B | `brief_only.yaml` | 只加确定性 `repo_brief`，不开放 `code_search`/`repo_map` |
+| C | `retrieval.yaml` | brief + `code_context`/`code_search`/`repo_map`/`find_references` + 检索后行动提示 |
+| D | `retrieval_gate.yaml` | 旧行为：工具 + 提示词 + 强制首步检索 |
+
+B 用来隔离“预检索上下文”，C−B 才是“检索工具/行动策略”的增量，C−D 用来估计 gate 的影响。
+正式比较仍需要至少 2 轮、最好 3 轮，报告配对 CI；单轮 1–2 题差异落在 37–42 的 baseline 方差内，
+不能作为收益证据。旧的 `pilot_20261017`/`gate-20261017` 结果继续作为历史证据，不与新配置混算。
+
 ## 当前状态（台式机，2026-10-18）
 
 | 轮次 | 源码 | 通过 | 空补丁 | 评分错误 | 调用 | 成本（USD） |

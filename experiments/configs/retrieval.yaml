@@ -36,6 +36,15 @@ agent:
   - read_many_files
   - repo_map
   - code_search
+  - code_context
+  - find_references
+  # Recommended policy: inject a deterministic repo brief and let the model
+  # choose the next action. No mandatory first search; use retrieval_gate.yaml
+  # to reproduce the old forced-search arm.
+  retrieval_policy: brief
+  repo_brief: true
+  repo_brief_max_chars: 3000
+  repo_brief_max_files: 6
   format_error_template: |
     Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.
 
@@ -82,11 +91,12 @@ agent:
     - DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)
 
     ## Recommended Workflow
-    1. Call repo_map or code_search with keywords from the issue. Do this before ls, grep, or find.
-    2. Create a script to reproduce the issue, but do not include that script in the submission
-    3. Edit the existing source file in place to resolve the issue
-    4. Verify your fix works by running your script again
-    5. Test edge cases to ensure your fix is robust
+    1. Read the repository brief. If it names a file or symbol, inspect that before broad search.
+    2. If no candidate is decisive, use code_context, code_search, or repo_map with keywords from the issue.
+    3. State one hypothesis about the cause; create a script to reproduce it, but do not include that script in the submission.
+    4. Edit the existing source file in place with the smallest change that tests the hypothesis.
+    5. Verify with the focused reproduction or test; then test edge cases if time permits.
+    6. After two failed hypotheses, stop broad searching and either reproduce the issue or submit the best patch.
 
     ## Command Execution Rules
     You are operating in an environment where
@@ -235,7 +245,12 @@ agent:
     {% for t in tool_specs %}- {{t.name}}: {{t.description}} ({{t.parameters}})
     {% endfor %}
     {% endif %}
-    If repo_map or code_search is available, call one of them before any shell command.
+    A deterministic repository brief may be appended to the task. Read it first.
+    If it names a file or symbol, inspect that before broad search. If the hints do not resolve,
+    use code_context, code_search, or repo_map with keywords from the issue.
+    After each retrieval: read the most specific candidate, state one hypothesis, make the
+    smallest edit, and run a focused test. After two failed hypotheses, stop broad searching
+    and either reproduce the issue or submit the best patch.
 
     <format_example>
     THOUGHT: Your reasoning and analysis here

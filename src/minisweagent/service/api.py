@@ -20,6 +20,7 @@ from minisweagent.service.store import TaskStore
 
 BASE_TOOLS = ["read_file", "write_file", "refined_read_file", "search_file_content", "replace",
               "find_definition", "read_many_files"]
+RETRIEVAL_TOOLS = ["code_search", "repo_map", "code_context", "find_references"]
 ARTIFACTS = {"patch.diff", "trajectory.json", "checkpoint.json", "verification.txt"}
 
 
@@ -90,7 +91,7 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
         if settings.workspace_volume:
             task_config["workspace_volume"] = settings.workspace_volume
         task_config["agent"]["enabled_tools"] = BASE_TOOLS + (
-            ["code_search", "repo_map"] if request.variant == "retrieval" else []
+            RETRIEVAL_TOOLS if request.variant == "retrieval" else []
         )
         return public(store.create(request.model_dump() | {"repo": repo}, task_config))
 

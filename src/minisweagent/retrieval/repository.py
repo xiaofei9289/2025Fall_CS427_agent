@@ -2,23 +2,40 @@
 # ruff: noqa: UP021, UP022, UP037
 
 import ast
+import gzip
+import hashlib
 import io
+import json
 import math
 import os
 import re
 import subprocess
+import tempfile
 import tokenize
 from collections import Counter
 from pathlib import Path
 
 EXCLUDED_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "build", "dist"}
 STOP_WORDS = set("a an the in on to of is it for and or with from this that be as def class return import self".split())
+SUPPORT_DIRS = {"test", "tests", "docs", "doc", "tutorials", "examples", "benchmarks"}
+GENERIC_NAMES = set(
+    "name value data id pk get set save delete update create read write close items keys values copy format join "
+    "split strip lower upper append extend insert remove pop count index sort reverse run clean validate default "
+    "request context response".split()
+)
+CACHE_VERSION = 4
+CACHE_MIN_FILES = 100
 
 
 def terms(text: str) -> "list[str]":
     words = re.findall(r"[A-Za-z_]\w*", text)
     words += re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)", " ".join(words).replace("_", " "))
     return [word.lower() for word in words if word.lower() not in STOP_WORDS]
+
+
+def is_support_path(path: str) -> bool:
+    """Whether a path is test/docs/example material rather than product code."""
+    return any(part in SUPPORT_DIRS for part in path.split("/")[:-1])
 
 
 class SymbolVisitor(ast.NodeVisitor):
@@ -29,6 +46,7 @@ class SymbolVisitor(ast.NodeVisitor):
         self.owner_kinds: "list[str]" = []
         self.symbols: "list[dict]" = []
         self.variables: "list[dict]" = []
+        self.references: "Counter" = Counter()
 
     def visit_definition(self, node: "ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef") -> None:
         name = ".".join([*self.owners, node.name])
@@ -121,19 +139,73 @@ class SymbolVisitor(ast.NodeVisitor):
         self._record_variables(node, self._target_names(node.target))
         self.generic_visit(node)
 
+    def visit_Name(self, node: "ast.Name") -> None:
+        if isinstance(node.ctx, ast.Load):
+            self.references[node.id] += 1
+
 
 class RepositoryIndex:
-    def __init__(self, root: Path):
+    """AST symbol index plus BM25, repo map, and budgeted code context.
+
+    The index is deliberately self-contained: ``code_search.py`` injects this
+    source file into Docker/Local environments and runs it there. Split
+    retrieval modules would need a bundling step before they could be injected.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        cache: bool = True,
+        cache_dir: "str | None" = None,
+        cache_min_files: int = CACHE_MIN_FILES,
+    ):
         self.root = root.resolve()
         if not self.root.is_dir():
             raise ValueError(f"Repository directory does not exist: {self.root}")
+        self._cache_enabled = cache and os.environ.get("MINISWEAGENT_INDEX_CACHE", "1") != "0"
+        self._cache_dir = Path(cache_dir) if cache_dir else Path(tempfile.gettempdir()) / "minisweagent-index-cache"
+        self._cache_min_files = cache_min_files
         self.symbols: "list[dict]" = []
         self.variables: "list[dict]" = []
+        self.reference_counts: "Counter" = Counter()
         self.skipped: "list[dict]" = []
         self.file_count = 0
+        self.documents: "list[Counter]" = []
+        self.lengths: "list[int]" = []
+        self.average_length = 0.0
+        self.document_frequency: "Counter" = Counter()
+        self.file_document_frequency: "Counter" = Counter()
+        self.file_average_length = 0.0
+        self.symbol_count = 0
+        self.symbol_document_frequency: "Counter" = Counter()
+        self.symbol_average_length = 0.0
+        self.importance: "list[float]" = []
+
+        files = list(self._iter_python_files())
+        fingerprint = self._fingerprint(files)
+        if self._cache_enabled and self._load_cache(fingerprint):
+            return
+        self._build(files)
+        self.importance = self._compute_importance()
+        if self._cache_enabled and self.file_count >= self._cache_min_files:
+            self._save_cache(fingerprint)
+
+    def _iter_python_files(self):
+        """Yield ``(path, relative_path)`` for Python files in the workspace."""
         try:
             tracked = subprocess.run(
-                ["git", "-C", str(self.root), "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "*.py"],
+                [
+                    "git",
+                    "-C",
+                    str(self.root),
+                    "ls-files",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                    "--",
+                    "*.py",
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
@@ -148,12 +220,40 @@ class RepositoryIndex:
                 directories[:] = [name for name in directories if name not in EXCLUDED_DIRS]
                 paths.extend(Path(directory) / name for name in files if name.endswith(".py"))
         for path in sorted(paths):
-            if path.is_symlink() or self.root not in path.resolve().parents:
+            try:
+                resolved = path.resolve()
+            except OSError:
+                continue
+            if path.is_symlink() or self.root not in resolved.parents:
                 continue
             relative = path.relative_to(self.root)
             if EXCLUDED_DIRS.intersection(relative.parts) or not path.is_file():
                 continue
-            if path.stat().st_size > 1_000_000:
+            yield path, relative
+
+    def _fingerprint(self, files: "list[tuple[Path, Path]]") -> str:
+        """Cheap change detector for cache validation; never hashes file contents."""
+        digest = hashlib.sha1()
+        for path, relative in files:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            digest.update(
+                f"{relative.as_posix()}\0{stat.st_mtime_ns}\0{stat.st_ctime_ns}\0{stat.st_size}\n".encode(
+                    "utf-8", "replace"
+                )
+            )
+        return digest.hexdigest()
+
+    def _build(self, files: "list[tuple[Path, Path]]") -> None:
+        for path, relative in files:
+            try:
+                size = path.stat().st_size
+            except OSError as exc:
+                self.skipped.append({"path": str(relative), "reason": type(exc).__name__})
+                continue
+            if size > 1_000_000:
                 self.skipped.append({"path": str(relative), "reason": "file exceeds 1 MB"})
                 continue
             try:
@@ -168,6 +268,7 @@ class RepositoryIndex:
             visitor.visit(tree)
             self.symbols.extend(visitor.symbols)
             self.variables.extend(visitor.variables)
+            self.reference_counts.update(visitor.references)
             self.symbols.append(
                 {
                     "path": relative.as_posix(),
@@ -189,21 +290,159 @@ class RepositoryIndex:
         file_documents = [doc for symbol, doc in zip(self.symbols, self.documents) if symbol["kind"] == "module"]
         self.file_document_frequency = Counter(term for doc in file_documents for term in doc)
         self.file_average_length = sum(sum(doc.values()) for doc in file_documents) / max(1, self.file_count)
+        symbol_documents = [
+            (doc, length)
+            for symbol, doc, length in zip(self.symbols, self.documents, self.lengths)
+            if symbol["kind"] != "module"
+        ]
+        self.symbol_count = len(symbol_documents)
+        self.symbol_document_frequency = Counter(term for doc, _ in symbol_documents for term in doc)
+        self.symbol_average_length = sum(length for _, length in symbol_documents) / max(1, self.symbol_count)
+
+    def _compute_importance(self) -> "list[float]":
+        """A cheap reference-count proxy for the empty-query repo map.
+
+        A full Aider-style reference graph is intentionally out of scope here.
+        Methods inherit their owner class's reference count, which avoids
+        letting ubiquitous attribute names such as ``name`` dominate the map.
+        """
+        counts = self.reference_counts
+        scores = []
+        for symbol in self.symbols:
+            if symbol["kind"] == "module":
+                scores.append(0.0)
+                continue
+            simple = symbol["name"].rsplit(".", 1)[-1]
+            if symbol["kind"] == "method":
+                owner = symbol["name"].rsplit(".", 1)[0].rsplit(".", 1)[-1]
+                score = float(counts.get(owner, 0)) * 0.5
+                if simple not in GENERIC_NAMES:
+                    score += float(counts.get(simple, 0)) * 0.2
+                score *= 0.8
+            else:
+                score = float(counts.get(simple, 0))
+                if simple in GENERIC_NAMES:
+                    score *= 0.1
+            if simple.startswith("_"):
+                score *= 0.25
+            if symbol["kind"] == "class":
+                score *= 1.5
+            elif len(simple) <= 2:
+                score *= 0.1
+            if is_support_path(symbol["path"]):
+                score *= 0.25
+            scores.append(score)
+        return scores
+
+    def _cache_path(self, fingerprint: str) -> Path:
+        key = hashlib.sha1(f"{self.root}\0{fingerprint}\0{CACHE_VERSION}".encode()).hexdigest()
+        return self._cache_dir / f"index-{key}.json.gz"
+
+    def _load_cache(self, fingerprint: str) -> bool:
+        path = self._cache_path(fingerprint)
+        try:
+            with gzip.open(str(path), "rt", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError, TypeError, EOFError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        if (
+            data.get("version") != CACHE_VERSION
+            or data.get("root") != str(self.root)
+            or data.get("fingerprint") != fingerprint
+        ):
+            return False
+        try:
+            symbols = data["symbols"]
+            variables = data["variables"]
+            documents = data["documents"]
+            lengths = data["lengths"]
+            importance = data["importance"]
+            if not (isinstance(symbols, list) and len(symbols) == len(documents) == len(lengths) == len(importance)):
+                return False
+            self.symbols = symbols
+            self.variables = variables
+            self.skipped = data["skipped"]
+            self.file_count = int(data["file_count"])
+            self.documents = [Counter(document) for document in documents]
+            self.lengths = [int(length) for length in lengths]
+            self.average_length = float(data["average_length"])
+            self.document_frequency = Counter(data["document_frequency"])
+            self.file_document_frequency = Counter(data["file_document_frequency"])
+            self.file_average_length = float(data["file_average_length"])
+            self.symbol_count = int(data["symbol_count"])
+            self.symbol_document_frequency = Counter(data["symbol_document_frequency"])
+            self.symbol_average_length = float(data["symbol_average_length"])
+            self.importance = [float(value) for value in importance]
+        except (KeyError, TypeError, ValueError):
+            return False
+        for entry in self.symbols:
+            entry["source"] = ""
+        for entry in self.variables:
+            entry["source"] = ""
+        return True
+
+    def _save_cache(self, fingerprint: str) -> None:
+        try:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+        data = {
+            "version": CACHE_VERSION,
+            "root": str(self.root),
+            "fingerprint": fingerprint,
+            "file_count": self.file_count,
+            "skipped": self.skipped,
+            "symbols": [{k: v for k, v in symbol.items() if k != "source"} for symbol in self.symbols],
+            "variables": [{k: v for k, v in variable.items() if k != "source"} for variable in self.variables],
+            "documents": [dict(document) for document in self.documents],
+            "lengths": self.lengths,
+            "average_length": self.average_length,
+            "document_frequency": dict(self.document_frequency),
+            "file_document_frequency": dict(self.file_document_frequency),
+            "file_average_length": self.file_average_length,
+            "symbol_count": self.symbol_count,
+            "symbol_document_frequency": dict(self.symbol_document_frequency),
+            "symbol_average_length": self.symbol_average_length,
+            "importance": self.importance,
+        }
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile("wb", dir=str(self._cache_dir), prefix=".index-", delete=False) as handle:
+                temporary = handle.name
+            with gzip.open(temporary, "wt", encoding="utf-8", compresslevel=3) as handle:
+                json.dump(data, handle, separators=(",", ":"))
+            os.replace(temporary, str(self._cache_path(fingerprint)))
+        except (OSError, TypeError, ValueError):
+            if temporary and Path(temporary).exists():
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
 
     def search(self, query: str, limit: int = 10, file_only: bool = False) -> "list[dict]":
         query_terms = set(terms(query))
         ranked = []
-        document_frequency = self.file_document_frequency if file_only else self.document_frequency
-        document_count = self.file_count if file_only else len(self.symbols)
-        average_length = self.file_average_length if file_only else self.average_length
+        if file_only:
+            document_frequency = self.file_document_frequency
+            document_count = self.file_count
+            average_length = self.file_average_length
+        else:
+            document_frequency = self.symbol_document_frequency
+            document_count = self.symbol_count
+            average_length = self.symbol_average_length
         for symbol, document, length in zip(self.symbols, self.documents, self.lengths):
-            if file_only and symbol["kind"] != "module":
+            if file_only:
+                if symbol["kind"] != "module":
+                    continue
+            elif symbol["kind"] == "module":
                 continue
             score = 0.0
             for term in query_terms & document.keys():
                 frequency = document[term]
                 idf = math.log(1 + (document_count - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5))
-                score += idf * frequency * 2.5 / (frequency + 1.5 * (0.25 + 0.75 * length / average_length))
+                score += idf * frequency * 2.5 / (frequency + 1.5 * (0.25 + 0.75 * length / max(1.0, average_length)))
             if symbol["kind"] != "module":
                 score += 2 * len(query_terms & set(terms(symbol["name"])))
             if score > 0:
@@ -235,24 +474,32 @@ class RepositoryIndex:
             if name != symbol and name.rsplit(".", 1)[-1] != symbol:
                 continue
             matches.append(entry)
-        matches.sort(key=lambda entry: (
-            0 if entry["kind"] != "variable" else 1,
-            0 if entry["name"] == symbol else 1,
-            entry["path"],
-            entry["start_line"],
-            entry["name"],
-        ))
+        matches.sort(
+            key=lambda entry: (
+                0 if entry["kind"] != "variable" else 1,
+                0 if entry["name"] == symbol else 1,
+                entry["path"],
+                entry["start_line"],
+                entry["name"],
+            )
+        )
         return matches[:limit] if limit is not None else matches
 
     def repo_map(self, query: str, max_chars: int = 6000) -> str:
-        candidates = (
-            self.search(query, limit=len(self.symbols))
-            if query.strip()
-            else sorted(
-                ({k: v for k, v in s.items() if k != "source"} for s in self.symbols if s["kind"] != "module"),
-                key=lambda s: (s["path"], s["start_line"], s["name"]),
+        if query.strip():
+            candidates = [
+                {k: v for k, v in symbol.items() if k != "source"} for symbol in self.search(query, len(self.symbols))
+            ]
+        else:
+            ranked = sorted(
+                (
+                    (self.importance[index], symbol)
+                    for index, symbol in enumerate(self.symbols)
+                    if symbol["kind"] != "module" and not is_support_path(symbol["path"])
+                ),
+                key=lambda item: (-item[0], item[1]["path"], item[1]["start_line"], item[1]["name"]),
             )
-        )
+            candidates = [{k: v for k, v in symbol.items() if k != "source"} for _, symbol in ranked]
         output = (
             f"Python repository: {self.file_count} files; {len(self.symbols)} entries; {len(self.skipped)} skipped.\n"
         )
@@ -264,6 +511,172 @@ class RepositoryIndex:
                 omitted = True
                 continue
             output += line
+        if omitted:
+            output += marker
+        return output[:max_chars]
+
+    def _entry_source(self, symbol: dict) -> str:
+        """Return symbol source, reading it from disk for cache-loaded entries."""
+        source = symbol.get("source") or ""
+        if source:
+            return source
+        try:
+            text = (self.root / symbol["path"]).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return symbol.get("signature", "")
+        lines = text.splitlines()
+        return "\n".join(lines[symbol["start_line"] - 1 : symbol["end_line"]])
+
+    def _class_header(self, symbol: dict) -> str:
+        if symbol["kind"] != "method":
+            return ""
+        owner = symbol["name"].rsplit(".", 1)[0]
+        for candidate in self.symbols:
+            if candidate["kind"] == "class" and candidate["path"] == symbol["path"] and candidate["name"] == owner:
+                return candidate["signature"]
+        return ""
+
+    def _context_selection(self, query: str, max_files: int = 5) -> "list[dict]":
+        """Select files and symbols for the context builder and offline eval."""
+        if not isinstance(max_files, int) or max_files < 1:
+            max_files = 5
+        if query.strip():
+            file_hits = self.search(query, limit=len(self.symbols), file_only=True)
+            symbol_hits = self.search(query, limit=50)
+        else:
+            file_hits = []
+            ranked = sorted(
+                (
+                    (self.importance[index], symbol)
+                    for index, symbol in enumerate(self.symbols)
+                    if symbol["kind"] != "module"
+                ),
+                key=lambda item: (-item[0], item[1]["path"], item[1]["start_line"], item[1]["name"]),
+            )
+            symbol_hits = [
+                {**{k: v for k, v in symbol.items() if k != "source"}, "score": score} for score, symbol in ranked[:50]
+            ]
+        candidates = {}
+        for rank, hit in enumerate(file_hits):
+            path = hit["path"]
+            entry = candidates.setdefault(path, {"path": path, "symbols": [], "file_score": 0.0, "file_rank": rank})
+            entry["file_score"] = max(entry["file_score"], hit["score"])
+        for rank, hit in enumerate(symbol_hits):
+            path = hit["path"]
+            entry = candidates.setdefault(path, {"path": path, "symbols": [], "file_score": 0.0, "file_rank": 10**6})
+            entry["symbols"].append((rank, hit))
+        if not candidates:
+            return []
+
+        def order_key(item):
+            entry = item[1]
+            best_symbol = min((rank for rank, _ in entry["symbols"]), default=10**6)
+            fused = 0.0
+            if entry["file_rank"] < 10**6:
+                fused += 1.0 / (60 + entry["file_rank"] + 1)
+            if best_symbol < 10**6:
+                fused += 1.0 / (60 + best_symbol + 1)
+            return (is_support_path(entry["path"]), -fused, entry["path"])
+
+        selected = []
+        support_files = 0
+        for entry in (item[1] for item in sorted(candidates.items(), key=order_key)):
+            if is_support_path(entry["path"]):
+                if support_files >= 1:
+                    continue
+                support_files += 1
+            if not entry["symbols"]:
+                fallback = [
+                    symbol
+                    for symbol in self.symbols
+                    if symbol["path"] == entry["path"] and symbol["kind"] in {"class", "function", "method"}
+                ]
+                fallback.sort(key=lambda symbol: (symbol["start_line"], symbol["name"]))
+                if fallback:
+                    entry["symbols"] = [
+                        (
+                            10**6,
+                            {**{k: v for k, v in fallback[0].items() if k != "source"}, "score": entry["file_score"]},
+                        )
+                    ]
+            if entry["symbols"]:
+                selected.append(entry)
+            if len(selected) >= max_files:
+                break
+
+        for entry in selected:
+            ranked_symbols = sorted(entry["symbols"], key=lambda item: item[0])[:3]
+            kept = []
+            for _, symbol in ranked_symbols:
+                # Keep the most specific definition: drop a class/function when
+                # it contains another selected symbol (usually one of its methods).
+                if any(
+                    other is not symbol
+                    and symbol["start_line"] <= other["start_line"]
+                    and symbol["end_line"] >= other["end_line"]
+                    and (symbol["start_line"], symbol["end_line"]) != (other["start_line"], other["end_line"])
+                    for _, other in ranked_symbols
+                ):
+                    continue
+                kept.append(symbol)
+            entry["symbols"] = kept[:1] if kept else ([ranked_symbols[0][1]] if ranked_symbols else [])
+        return selected
+
+    def context_files(self, query: str, max_files: int = 5) -> "list[str]":
+        """Ordered file paths selected by the context builder (used by offline eval)."""
+        return [entry["path"] for entry in self._context_selection(query, max_files)]
+
+    def build_context(
+        self,
+        query: str,
+        max_chars: int = 6000,
+        max_files: int = 5,
+        snippet_lines: int = 8,
+    ) -> str:
+        """Return a compact, budgeted context block with signatures and snippets."""
+        selected = self._context_selection(query, max_files)
+        clean_query = " ".join(query.split())[:200]
+        header = "Code context for: %s\nRanked by BM25 file/symbol fusion; snippets are excerpts.\n" % (
+            clean_query or "(structural overview)"
+        )
+        if not selected:
+            return (header + "No matching Python symbols.\n")[:max_chars]
+        raw_scores = [symbol.get("score", 0.0) for entry in selected for symbol in entry["symbols"]]
+        max_score = max(raw_scores) if raw_scores else 1.0
+        marker = "\n[context truncated to character budget]\n"
+        output = header
+        omitted = False
+        for entry in selected:
+            block_lines = [entry["path"]]
+            for symbol in entry["symbols"]:
+                score = (symbol.get("score", 0.0) / max_score) if max_score else 0.0
+                block_lines.append(
+                    f"  {symbol['name']}  lines {symbol['start_line']}-{symbol['end_line']}  [score {score:.2f}]"
+                )
+                class_header = self._class_header(symbol)
+                if class_header:
+                    block_lines.append("  " + class_header)
+                snippet = self._entry_source(symbol)
+                snippet_lines_list = snippet.splitlines()
+                if snippet_lines <= 0 or not snippet_lines_list:
+                    block_lines.append("  " + symbol.get("signature", ""))
+                    snippet_lines_list = []
+                elif len(snippet_lines_list) > snippet_lines:
+                    snippet_lines_list = snippet_lines_list[:snippet_lines] + ["..."]
+                for line in snippet_lines_list:
+                    block_lines.append("  " + line)
+                block_lines.append("")
+            block = "\n".join(block_lines).rstrip()
+            remaining = max_chars - len(marker) - len(output) - 2
+            if remaining <= 0:
+                omitted = True
+                break
+            if len(block) > remaining:
+                block = block[: max(0, remaining - 3)].rstrip() + "..."
+                omitted = True
+            output += "\n" + block + "\n"
+            if omitted:
+                break
         if omitted:
             output += marker
         return output[:max_chars]
@@ -335,13 +748,32 @@ def find_definition(
 
 
 def retrieve(args: dict) -> dict:
+    operation = args.get("operation")
+    if operation not in {"code_search", "repo_map", "context"}:
+        return {"output": f"Unknown retrieval operation: {operation}", "returncode": 2}
+    query = args.get("query", "")
+    if operation in {"code_search", "context"} and (not isinstance(query, str) or not query.strip()):
+        return {"output": "query must be a nonempty string", "returncode": 2}
     index = RepositoryIndex(Path(args.get("root", ".")))
-    if args["operation"] == "repo_map":
-        return {"output": index.repo_map(args.get("query", ""), args.get("max_chars", 6000)), "returncode": 0}
+    if operation == "repo_map":
+        return {
+            "output": index.repo_map(query if isinstance(query, str) else "", args.get("max_chars", 6000)),
+            "returncode": 0,
+        }
+    if operation == "context":
+        return {
+            "output": index.build_context(
+                query,
+                args.get("max_chars", 6000),
+                args.get("max_files", 5),
+                args.get("snippet_lines", 8),
+            ),
+            "returncode": 0,
+        }
     return {
-        "output": __import__("json").dumps(
+        "output": json.dumps(
             {
-                "matches": index.search(args["query"], args.get("limit", 10)),
+                "matches": index.search(query, args.get("limit", 10)),
                 "files_indexed": index.file_count,
                 "skipped": index.skipped,
             }

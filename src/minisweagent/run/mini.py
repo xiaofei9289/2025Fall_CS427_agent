@@ -49,6 +49,12 @@ try:  # pragma: no cover - convenience import
     import minisweagent.tools.memory_search  # noqa: F401
 except Exception:  # noqa: BLE001
     logger.error("Failed to import memory search tool", exc_info=True)
+
+# Register reference lookup tool
+try:  # pragma: no cover - convenience import
+    import minisweagent.tools.find_references  # noqa: F401
+except Exception:  # noqa: BLE001
+    logger.error("Failed to import find_references tool", exc_info=True)
 DEFAULT_CONFIG = Path(os.getenv("MSWEA_MINI_CONFIG_PATH", builtin_config_dir / "mini.yaml"))
 # Default trajectory output to repo directory for easier access
 DEFAULT_OUTPUT = Path.cwd() / ".mini-swe-agent" / "last_mini_run.traj.json"
