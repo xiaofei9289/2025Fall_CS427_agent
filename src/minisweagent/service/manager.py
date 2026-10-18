@@ -34,19 +34,26 @@ class TaskManager:
         self.store.recover()
         self.thread.start()
 
-    def terminate(self, task_id: str, process: subprocess.Popen) -> None:
-        if process.poll() is None:
+    @staticmethod
+    def _signal(process: subprocess.Popen, sig: int) -> None:
+        """Signal the worker group, falling back to the child if the host denies killpg."""
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
             try:
-                os.killpg(process.pid, signal.SIGTERM)
+                process.send_signal(sig)
             except ProcessLookupError:
                 pass
+
+    def terminate(self, task_id: str, process: subprocess.Popen) -> None:
+        if process.poll() is None:
+            self._signal(process, signal.SIGTERM)
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                self._signal(process, signal.SIGKILL)
                 process.wait()
         task = self.store.get(task_id)
         if container_id := task["result"].get("container_id"):

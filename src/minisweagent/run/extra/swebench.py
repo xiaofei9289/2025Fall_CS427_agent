@@ -20,10 +20,11 @@ from jinja2 import StrictUndefined, Template
 from rich.live import Live
 
 from minisweagent import Environment
-from minisweagent.agents.default import DefaultAgent
+from minisweagent.agents.workflow import RepairAgent
 from minisweagent.config import builtin_config_dir, get_config_path
 from minisweagent.environments import get_environment
 from minisweagent.models import get_model
+from minisweagent.repair.diff import sanitize_patch as sanitize_submission_patch
 from minisweagent.run.extra.experiment import write_manifest
 from minisweagent.run.extra.hf_dataset import load_hf_dataset
 from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
@@ -32,6 +33,7 @@ try:  # pragma: no cover
     import minisweagent.tools.basic  # noqa: F401
     import minisweagent.tools.code_search  # noqa: F401
     import minisweagent.tools.find_definition  # noqa: F401
+    import minisweagent.tools.find_references  # noqa: F401
     import minisweagent.tools.memory_search  # noqa: F401
     import minisweagent.tools.read  # noqa: F401
     import minisweagent.tools.read_many  # noqa: F401
@@ -127,8 +129,8 @@ VERIFIED_50_EXTRA = [
 _OUTPUT_FILE_LOCK = threading.Lock()
 
 
-class ProgressTrackingAgent(DefaultAgent):
-    """Simple wrapper around DefaultAgent that provides progress updates."""
+class ProgressTrackingAgent(RepairAgent):
+    """RepairAgent with progress updates; repair workflow stays opt-in via config."""
 
     def __init__(self, *args, progress_manager: RunBatchProgressManager, instance_id: str = "", **kwargs):
         super().__init__(*args, **kwargs)
@@ -169,40 +171,6 @@ def get_sb_environment(config: dict, instance: dict) -> Environment:
         if out["returncode"] != 0:
             raise RuntimeError(f"Error executing startup command: {out}")
     return env
-
-
-_JUNK_NAME = re.compile(r"^(reproduce\w*|run_test|test_fix|apply_patch|mock_query)\.py$")
-
-
-def _is_junk_diff_path(path: str, header: str) -> bool:
-    """Drop reproduction scripts, generated files, and new files left at the repo root."""
-    if path.startswith("_build/") or "/_build/" in path:
-        return True
-    if path.endswith((".doctree", ".pyc", ".png", ".so")):
-        return True
-    name = path.rsplit("/", 1)[-1]
-    if _JUNK_NAME.match(name):
-        return True
-    new_file = any(line.startswith("new file mode ") for line in header.splitlines()[:8])
-    return new_file and "/" not in path
-
-
-def sanitize_submission_patch(text: str) -> str:
-    """Keep source diffs and drop scratch files that make a submission fail to apply."""
-    if not text or "diff --git " not in text:
-        return ""
-    parts = re.split(r"(?=^diff --git )", text, flags=re.M)
-    kept: list[str] = []
-    for part in parts:
-        if not part.startswith("diff --git "):
-            continue
-        first = part.splitlines()[0]
-        match = re.match(r"diff --git a/(.+?) b/(.+)$", first)
-        path = match.group(1) if match else ""
-        if _is_junk_diff_path(path, part):
-            continue
-        kept.append(part if part.endswith("\n") else part + "\n")
-    return "".join(kept)
 
 
 def recover_tracked_patch(env: Environment) -> str:
@@ -271,6 +239,9 @@ def process_instance(
     remove_from_preds_file(output_dir / "preds.json", instance_id)
     (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
     config = copy.deepcopy(config)
+    if config.get("agent", {}).get("workflow_enabled"):
+        instance_dir.mkdir(parents=True, exist_ok=True)
+        config["agent"]["artifact_dir"] = str(instance_dir)
     model = get_model(config=config.get("model", {}))
     task = instance["problem_statement"]
 
@@ -375,6 +346,8 @@ def main(
     config_spec: Annotated[Path, typer.Option("-c", "--config", help="Path to a config file", rich_help_panel="Basic")] = builtin_config_dir / "extra" / "swebench.yaml",
     environment_class: Annotated[str | None, typer.Option("--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced")] = None,
     instance_ids: Annotated[Path | None, typer.Option("--instance-ids", help="JSON list fixing the task IDs and their order.", exists=True, dir_okay=False)] = None,
+    workflow: Annotated[bool, typer.Option("--workflow", help="Enable the evidence-driven repair workflow.", rich_help_panel="Advanced")] = False,
+    workflow_mode: Annotated[str, typer.Option("--workflow-mode", help="Workflow gate mode: advisory or strict.", rich_help_panel="Advanced")] = "advisory",
 ) -> None:
     # fmt: on
     output_path = Path(output)
@@ -418,6 +391,12 @@ def main(
         config.setdefault("model", {})["model_name"] = model
     if model_class is not None:
         config.setdefault("model", {})["model_class"] = model_class
+    if workflow:
+        if workflow_mode not in {"advisory", "strict"}:
+            raise ValueError("--workflow-mode must be 'advisory' or 'strict'")
+        agent_config = config.setdefault("agent", {})
+        agent_config["workflow_enabled"] = True
+        agent_config["workflow_mode"] = workflow_mode
 
     manifest = write_manifest(output_path, config, selected_ids, workers, selected_tasks)
     progress_manager = RunBatchProgressManager(len(instances), output_path / f"exit_statuses_{time.time()}.yaml")
