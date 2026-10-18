@@ -336,9 +336,7 @@ def load_verified_instances(variant: str) -> list[dict]:
 
     instance_ids = variant_mapping[variant]
     verified_instances = list(load_hf_dataset("princeton-nlp/SWE-Bench_Verified", "test"))
-    filtered_instances = [instance for instance in verified_instances if instance["instance_id"] in instance_ids]
-
-    return filtered_instances
+    return [instance for instance in verified_instances if instance["instance_id"] in instance_ids]
 
 
 def filter_instances(

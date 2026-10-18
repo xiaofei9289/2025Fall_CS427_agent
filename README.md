@@ -31,7 +31,14 @@ Development dependencies:
 pip install -e ".[dev]"
 ```
 
+If the virtualenv was created by `uv venv` without `--seed`, it has no pip; run
+`python -m ensurepip --upgrade` first, or use
+`uv pip install -e ".[dev]" --python .venv/bin/python`.
+
 For the HTTP service, install `pip install -e '.[service,dev]'`. Run all tests and Docker builds on the desktop Linux/WSL environment; see [deployment guide](deployment/README.md). The local Mac is used for editing only.
+
+The reproducible V2 baseline, including exact acceptance commands and the
+public-main/interface inventory, is in [docs/v2_baseline.md](docs/v2_baseline.md).
 
 ## Architecture and evidence
 
@@ -78,12 +85,19 @@ agent.run("Write a sudoku game")
 
 ## Tests
 
-Run the scoped checks on the desktop using the [deployment guide](deployment/README.md). Latest validation: 239 passed, 9 slow tests deselected; Ruff and the HTTP/Docker demo with finalization events and API restart passed. See [validation records](desktop_validation/README.md). Some upstream tests require external model services or Docker and are not part of the offline regression suite.
+```bash
+pytest -q            # offline regression suite; slow tests are deselected by default
+pytest -q -m slow    # Docker/Singularity, terminal, and Hugging Face network tests
+python scripts/verify_v2_baseline.py  # import, tools, config, and offline tests
+```
+
+Run the scoped checks on the desktop using the [deployment guide](deployment/README.md). Latest V2 local validation: 567 passed, 19 skipped, 50 slow tests deselected; Ruff and the HTTP/Docker demo with finalization events and API restart passed previously. See [validation records](desktop_validation/README.md). Some upstream tests require external model services or Docker and are not part of the offline regression suite.
 
 ## Documentation
 
 - Tool extension: `cs427_tools_extension.md`
 - Memory extension: `cs427_memory.md`
+- V2 reproducible baseline: [docs/v2_baseline.md](docs/v2_baseline.md)
 - Delivery and interview notes: [project delivery](docs/project_delivery.md)
 - Controlled experiment plan: [experiments/PLAN.md](experiments/PLAN.md)
 - Clean A/B/C memory experiment: [design](experiments/memory_abc_20261019/DESIGN.md) and [runbook](experiments/memory_abc_20261019/README.md)

@@ -13,8 +13,8 @@ Example user prompts:
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import register
 
@@ -67,9 +67,9 @@ class TodoTool:
                 return {"output": f"Added '{task}' to the TODO list.", "returncode": 0}
 
             elif action == "list":
-                if not os.path.exists(TODO_FILE):
+                if not Path(TODO_FILE).exists():
                     return {"output": "TODO list is empty.", "returncode": 0}
-                with open(TODO_FILE, "r") as f:
+                with open(TODO_FILE) as f:
                     content = f.read()
                 if not content.strip():
                     return {"output": "TODO list is empty.", "returncode": 0}
@@ -79,10 +79,10 @@ class TodoTool:
                 if task_number is None:
                     return {"output": "Error: 'task_number' is required for the 'remove' action.", "returncode": 1}
                 
-                if not os.path.exists(TODO_FILE):
+                if not Path(TODO_FILE).exists():
                     return {"output": "Error: TODO list is empty, cannot remove.", "returncode": 1}
 
-                with open(TODO_FILE, "r") as f:
+                with open(TODO_FILE) as f:
                     lines = f.readlines()
 
                 if not (1 <= task_number <= len(lines)):
