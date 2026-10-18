@@ -4,7 +4,7 @@ A clean implementation of the pre-registered comparison in [DESIGN.md](DESIGN.md
 
 - **A (`window`)**: system + task + newest complete turns that fit.
 - **B (`summary`)**: the same window plus a bounded deterministic evidence summary of dropped turns.
-- **C (`summary_search`)**: exactly B's prompt policy plus `memory_search` over this run's transcript up to the current step.
+- **C (`summary_search`)**: B's prompt policy plus `memory_search` over this run's transcript and a C-only instruction to call it when earlier evidence is no longer visible.
 
 All arms share one 8000 estimated-token prompt budget, one task set, one model, one prompt, the same ordinary tools, 400 steps, and $10 per task. The summary is capped at 1000; a single retrieval result is capped at 1500. The summary and retrieval results are inside the 8000, not extra.
 
@@ -17,6 +17,7 @@ All arms share one 8000 estimated-token prompt budget, one task set, one model, 
 - Every view is written to `memory_trace.jsonl`: token accounting, sent/dropped indices, summary text, task presence, retrieval tokens. The report audits budget compliance rather than trusting the agent.
 - The summary is deterministic and pure: B and C summarize the same dropped turns identically, and a replay yields the same summary. It is not a second model call. See [DESIGN.md](DESIGN.md) §6 for why this is the deliberate choice for a clean C−B comparison.
 - The first 10-task pilot found that C never called `memory_search`; see [PILOT_20261018.md](PILOT_20261018.md). The next pilot must show search usage before C−B is treated as a retrieval effect.
+- A C-only p2c smoke on the integrated source repeated the zero-search result and exposed a fatal oversized-action budget case; see [PILOT_P2C_20261018.md](PILOT_P2C_20261018.md). The action is now clipped, and C has an explicit call-when-needed instruction; rerun the smoke before the full p2.
 - Invalidation now covers writes in the retained window, mixed read/write bash commands, re-read recency, and test passes invalidated by a later change; see [implementation notes](IMPLEMENTATION_20261018.md).
 - `comparison.md` includes offline mechanism metrics: mean estimated/actual prompt tokens, repeat reads, recovery re-reads, and lost read exposures. These are proxies, not causal error labels.
 - `full.yaml` is an optional no-compression arm for a **separate** product comparison. It is not part of the A/B/C report.

@@ -21,10 +21,10 @@
 | 保留任务 | 是 | 是 | 是 |
 | 历史单位 | 完整 turn | 完整 turn | 完整 turn |
 | 超限后 | 丢最旧完整 turn | 丢最旧完整 turn，保留证据摘要 | 同 B |
-| `memory_search` | 无 | 无 | 有，仅当前 run |
+| `memory_search` | 无 | 无 | 有，仅当前 run；另含 C-only 调用条件说明 |
 | 其他工具 | 相同 | 相同 | 相同 |
 
-配置文件在 `configs/base.yaml` + `configs/{a,b,c}.yaml`。每个 arm 文件**只能**设置 `agent.memory_policy`，`study_config.py` 会拒绝任何其他覆盖。`memory_search` 不在 `enabled_tools` 里，由 C 的 policy 安装；因此三份配置除 policy 外逐字段相同。
+配置文件在 `configs/base.yaml` + `configs/{a,b,c}.yaml`。每个 arm 文件**只能**设置 `agent.memory_policy`，`study_config.py` 会拒绝任何其他覆盖。`memory_search` 不在 `enabled_tools` 里，由 C 的 policy 安装；C 的 policy 还会在 system prompt 末尾追加一段“何时调用 memory_search”的说明。这是 C treatment 的一部分，A/B 不包含。
 
 ## 3. 固定条件
 
@@ -44,11 +44,11 @@
 ### 4.2 组合顺序
 
 1. system prompt + 当前 task：固定，永不丢；放不下就硬失败，不静默丢任务。
-2. 最新一个完整 turn：固定；只有它单独超预算时才截断它的 observation，保留 action。
+2. 最新一个完整 turn：固定；只有它单独超预算时才截断它的 observation，保留 action。若 action 单独就超预算（例如模型输出损坏或失控），截断 action 并记录 clipped；不因此终止任务，下一次模型调用仍保留 task 和这一截断后的 action。
 3. 摘要（B/C）：最多 1000；放不下就丢摘要，绝不为了摘要挤掉最新 turn。
 4. 更旧的完整 turn：按从新到旧加入；新的放不下就停止，绝不跳着保留更旧的。
 
-A 没有第 3 步；B/C 的第 3 步相同。C 不获得额外额度：`memory_search` 的工具描述从第 1 步就占 system prompt，这是检索策略的真实成本，不补偿。
+A 没有第 3 步；B/C 的第 3 步相同。C 不获得额外额度：`memory_search` 的工具描述和 C-only 调用说明从第 1 步就占 system prompt，这是检索策略的真实成本，不补偿。
 
 ### 4.3 硬约束与失败
 
@@ -58,13 +58,13 @@ A 没有第 3 步；B/C 的第 3 步相同。C 不获得额外额度：`memory_s
 - 摘要消息 ≤ 1000；
 - 每个检索结果 ≤ 1500（单条，不是总和；总和仍受 8000 约束）；
 - task 必须在发送内容里；
-- history 只能是完整 turn（最新 observation 的截断除外）。
+- history 只能是完整 turn（最新 observation 或 action 的截断除外）。
 
-任一断言失败抛 `BudgetError`，agent 以 `MemoryBudgetError` 结束；分析把它标为无效 run，而不是当作普通失败。
+只有固定前缀（system + task）本身放不下时才抛 `BudgetError`，agent 以 `MemoryBudgetError` 结束；最新 action/observation 超预算会截断并记录 `clipped`，不再作为终止错误。分析把真正的 `MemoryBudgetError` 标为无效 run，而不是当作普通失败。
 
 ### 4.4 实测前缀
 
-用 1,500 字符的 task 实测：A/B 的 system+task 约 **1,894** 估算 token；C 因为多一个 937 字符的工具 spec，约 **2,122**。即 C 的历史预算比 B 少约 228 token（总预算的 2.9%）。这是 C−B 的保守偏差：C 若仍然更好，结论更强；C 若更差，不能区分“检索没用”和“少了 228 token”。
+用 1,500 字符的 task 实测：A/B 的 system+task 约 **1,894** 估算 token；C 因为多一个 937 字符的工具 spec 和一段调用说明，约 **2,200**。即 C 的历史预算比 B 少约 300 token（总预算的 3.7%）。这是 C−B 的保守偏差：C 若仍然更好，结论更强；C 若更差，不能区分“检索没用”和“少了 300 token”。
 
 ## 5. 对话表示：turn 是原子
 

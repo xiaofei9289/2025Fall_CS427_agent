@@ -90,6 +90,16 @@ def test_latest_turn_is_clipped_only_when_it_cannot_fit():
     assert "truncated" in view.messages[-1]["content"]
 
 
+def test_oversized_action_is_clipped_instead_of_fatal():
+    messages = transcript(turns=2)
+    messages[-2]["content"] = "```bash\n" + "A" * 20000 + "\n```"
+    view = build_policy("window", PolicyLimits(total_tokens=1000, summary_tokens=200, retrieval_tokens=200)).build(messages)
+    assert view.total_tokens <= 1000
+    assert view.clipped
+    assert view.task_present
+    assert len(view.messages[-1]["content"]) < 20000
+
+
 def test_task_is_pinned_even_when_the_budget_binds():
     messages = transcript()
     view = build_policy("window", PolicyLimits(total_tokens=500, summary_tokens=100, retrieval_tokens=100)).build(messages)

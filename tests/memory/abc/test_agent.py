@@ -117,6 +117,7 @@ def test_search_agent_has_the_tool_and_a_bounded_result(tmp_path):
     assert status == "Submitted"
     assert "memory_search" in agent.tools
     assert any(spec["name"] == "memory_search" for spec in agent.extra_template_vars["tool_specs"])
+    assert "call the memory_search tool" in agent.config.system_template
     trace = read_trace(tmp_path / "memory_trace.jsonl")
     assert any(record["retrieval_tokens"] > 0 for record in trace)
     assert all(record["retrieval_tokens"] <= 120 for record in trace)
@@ -130,6 +131,17 @@ def test_window_and_summary_have_no_search_tool(tmp_path):
         agent = MemoryAgent(FakeModel([]), FakeEnv(), **config(tmp_path, policy).__dict__)
         assert "memory_search" not in agent.tools
         assert all(spec["name"] != "memory_search" for spec in agent.extra_template_vars["tool_specs"])
+        assert "call the memory_search tool" not in agent.config.system_template
+
+
+def test_oversized_model_response_does_not_terminate(tmp_path):
+    huge = "<｜｜DSML｜｜ calls>" + "A" * 20000
+    model = FakeModel([huge, "```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"])
+    agent = MemoryAgent(model, FakeEnv(), **config(tmp_path, "window").__dict__)
+    status, message = agent.run("fix the parser")
+    assert status == "Submitted", message
+    trace = read_trace(tmp_path / "memory_trace.jsonl")
+    assert any(record["clipped"] for record in trace)
 
 
 def test_budget_error_is_reported_not_hidden(tmp_path):

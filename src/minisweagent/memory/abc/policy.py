@@ -101,7 +101,20 @@ def _fit_latest(segment: Segment, available: int) -> _Latest:
     action = messages[0]
     action_tokens = estimate_message_tokens(action)
     if action_tokens >= available:
-        raise BudgetError("the newest action alone does not fit the prompt budget")
+        # A malformed or runaway model response can be larger than the whole
+        # remaining budget.  Treat it as clipped history instead of a fatal
+        # budget error: the next model call still gets the task and can recover.
+        try:
+            clipped_action = _clip_message(action, available)
+        except BudgetError:
+            return _Latest([], (), 0, True, tuple(indices))
+        return _Latest(
+            [clipped_action],
+            (indices[0],),
+            estimate_message_tokens(clipped_action),
+            True,
+            tuple(indices[1:]),
+        )
     users = [index for index, message in enumerate(messages) if message.get("role") == "user"]
     if not users:
         return _Latest([action], (indices[0],), action_tokens, True, tuple(indices[1:]))

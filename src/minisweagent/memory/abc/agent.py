@@ -31,6 +31,13 @@ class MemoryBudgetError(TerminatingException):
     """The prompt cannot be constructed without dropping the task or newest turn."""
 
 
+_SEARCH_GUIDANCE = (
+    "\n\nWhen a file, error, command result, or earlier decision you need is no longer "
+    "visible, call the memory_search tool before guessing, re-reading files, or repeating "
+    "a search. It can reopen earlier messages from this run by keyword or transcript index."
+)
+
+
 @dataclass
 class MemoryAgentConfig(AgentConfig):
     """Agent settings used by the clean experiment.
@@ -126,6 +133,10 @@ class MemoryAgent(DefaultAgent):
             )
         self.retrieval_gate = set()
         self.extra_template_vars["tool_specs"] = [tool_spec(tool) for tool in self.tools.values()]
+        if self.config.memory_policy == "summary_search":
+            # The tool description alone did not change behaviour in the p2c
+            # pilot; make the call condition explicit in the C-only prompt.
+            self.config.system_template = self.config.system_template.rstrip() + _SEARCH_GUIDANCE
         self.tracer = MemoryTrace(self.config.memory_trace_path)
         if not self.config.memory_policy:
             raise ValueError("memory_policy must be set")
