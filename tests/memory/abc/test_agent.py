@@ -140,3 +140,15 @@ def test_budget_error_is_reported_not_hidden(tmp_path):
     status, message = agent.run("unused")
     assert status == "MemoryBudgetError"
     assert "budget" in message.lower()
+
+
+def test_full_agent_does_not_enforce_the_prompt_budget(tmp_path):
+    model = FakeModel(responses())
+    agent = MemoryAgent(model, FakeEnv(), **config(tmp_path, "full", total=200, summary=50, retrieval=50).__dict__)
+    status, _ = agent.run("fix the parser")
+    assert status == "Submitted"
+    trace = read_trace(tmp_path / "memory_trace.jsonl")
+    assert trace
+    assert all(record["budget_enforced"] is False for record in trace)
+    assert any(record["budget"] > 200 for record in trace)
+    assert all(record["task_present"] for record in trace)

@@ -17,6 +17,9 @@ All arms share one 8000 estimated-token prompt budget, one task set, one model, 
 - Every view is written to `memory_trace.jsonl`: token accounting, sent/dropped indices, summary text, task presence, retrieval tokens. The report audits budget compliance rather than trusting the agent.
 - The summary is deterministic and pure: B and C summarize the same dropped turns identically, and a replay yields the same summary. It is not a second model call. See [DESIGN.md](DESIGN.md) §6 for why this is the deliberate choice for a clean C−B comparison.
 - The first 10-task pilot found that C never called `memory_search`; see [PILOT_20261018.md](PILOT_20261018.md). The next pilot must show search usage before C−B is treated as a retrieval effect.
+- Invalidation now covers writes in the retained window, mixed read/write bash commands, re-read recency, and test passes invalidated by a later change; see [implementation notes](IMPLEMENTATION_20261018.md).
+- `comparison.md` includes offline mechanism metrics: mean estimated/actual prompt tokens, repeat reads, recovery re-reads, and lost read exposures. These are proxies, not causal error labels.
+- `full.yaml` is an optional no-compression arm for a **separate** product comparison. It is not part of the A/B/C report.
 
 ## Run
 

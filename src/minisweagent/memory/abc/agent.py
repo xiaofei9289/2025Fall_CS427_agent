@@ -85,6 +85,7 @@ class MemoryTrace:
             "task_index": view.task_index,
             "task_present": view.task_present,
             "clipped": view.clipped,
+            "budget_enforced": view.budget_enforced,
             "full_messages": full_messages,
         }
         with self.path.open("a", encoding="utf-8") as handle:
