@@ -29,6 +29,14 @@ temperature=0);`DEEPSEEK_API_KEY` 经环境变量注入,不写入配置、仓库
 400 步运行中 `matplotlib-20826` 与 `django-11532` 一轮通过一轮未过(见下节),提示单次运行
 存在方差,重要比较宜做多轮复核。
 
+## 重复运行方差(2026-10-18 补充)
+
+`ablation5v5_20261018` 用同一 `baseline.yaml`、同一 `tasks.json`、同一 `07d8...` 源码另跑两轮
+50 题 baseline:r1 37/50、r2 40/50;两轮之间有 7 个任务翻转。与本目录 `baseline_r2` 的
+42/50 合并,三次同配置基线为 37/40/42。单轮相差 2 题不足以支持组件结论;后续对照以
+多轮重复和配对任务为准。r3 因 HuggingFace 数据集网络不可达未启动,retrieval 臂尚未开始,
+详见 [ablation5v5_20261018](../ablation5v5_20261018/README.md)。
+
 ## 事故记录(首轮 `baseline/` 目录,原样留档)
 
 首轮生成于批次收尾瞬间恰逢 Docker/WSL2 引擎崩溃(14:47:00 `error waiting for container:
