@@ -8,7 +8,10 @@ This repository extends [mini-swe-agent](https://github.com/SWE-agent/mini-swe-a
 
 - `src/minisweagent/`: the agent, environments, models, and the course extensions for tools and memory
 - Tools: `read_file`, `write_file`, `refined_read_file`, `read_many_files`, `search_file_content`, `replace`, `find_definition`, `todo`
-- Memory: `HistoryManager`, `SessionMemory`, `TrajectoryReplayer`
+- Memory: `HistoryManager` keeps complete recent action/observation turns and summarizes omitted execution evidence; `memory_search` looks up the full transcript or saved sessions; `SessionMemory` and `TrajectoryReplayer` store and replay runs
+- Retrieval: environment-side Python AST indexing with BM25/symbol search (`code_search`, `repo_map`)
+- Service: persistent FastAPI task queue, per-task Git workspaces, cancellation/resume, checkpoints, budget finalization, event traces, independent tests and candidate patches saved before verification
+- Evaluation: frozen task/config/source manifests, per-run integrity audits and matched baseline/retrieval and [budget finalization comparisons](experiments/budget_20261017)
 - `deliverables_midterm/`, `deliverables_final/`: SWE-bench run results and reports
 - `tests/`: tests for tools, memory, and the run flow
 
@@ -27,6 +30,25 @@ Development dependencies:
 ```bash
 pip install -e ".[dev]"
 ```
+
+For the HTTP service, install `pip install -e '.[service,dev]'`. Run all tests and Docker builds on the desktop Linux/WSL environment; see [deployment guide](deployment/README.md). The local Mac is used for editing only.
+
+## Architecture and evidence
+
+```mermaid
+flowchart LR
+  issue[Issue + repository] --> api[FastAPI task API]
+  api --> db[(SQLite queue + events)]
+  db --> worker[Worker + checkpoint]
+  worker --> agent[Agent: model / action / observation]
+  agent --> sandbox[Docker workspace + retrieval tools]
+  sandbox --> verify[Configured test command]
+  verify --> artifacts[Patch + trajectory + verification log]
+```
+
+The historical course runs resolved 19/50 and 25/50 selected tasks. They are not a controlled ablation: budgets/configurations differ (the final run mixed 50/100/250 step limits, and none of them enabled memory). See [run audits](experiments/baseline_audit) for evidence boundaries; the audited final run has 50 trajectories and no integrity issues. A new [five-task controlled pilot](experiments/pilot_20261017) was graded on the desktop: baseline 3/5 and retrieval 4/5, with no integrity issues. Those retrieval trajectories never called the new search tools. A later [gated rerun](experiments/gate-20261017) required a search call first: baseline resolved 4/5, and retrieval resolved 3/5 with one empty submission. That is still one run of five tasks.
+
+The service reports success only when a nonempty patch passes its configured test command. That is separate from the official SWE-bench outcome. This remains a trusted single-operator prototype; it does not yet demonstrate public multi-tenant operation or production traffic.
 
 ## Run
 
@@ -56,14 +78,14 @@ agent.run("Write a sudoku game")
 
 ## Tests
 
-```bash
-pytest
-```
+Run the scoped checks on the desktop using the [deployment guide](deployment/README.md). Latest validation: 239 passed, 9 slow tests deselected; Ruff and the HTTP/Docker demo with finalization events and API restart passed. See [validation records](desktop_validation/README.md). Some upstream tests require external model services or Docker and are not part of the offline regression suite.
 
 ## Documentation
 
 - Tool extension: `cs427_tools_extension.md`
 - Memory extension: `cs427_memory.md`
+- Delivery and interview notes: [project delivery](docs/project_delivery.md)
+- Controlled experiment plan: [experiments/PLAN.md](experiments/PLAN.md)
 - Upstream docs: <https://mini-swe-agent.com/latest/>
 
 ## Acknowledgments
