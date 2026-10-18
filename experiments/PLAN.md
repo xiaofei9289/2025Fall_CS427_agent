@@ -110,6 +110,8 @@ python -m minisweagent.run.extra.localization_eval \
 `memory_fix_20261018` 的首次运行被 TokenFY 渠道间歇性误报 `content_filter` 提前终止（两组 0/5、
 全空补丁；轨迹证据为 26 次 ok 对 4 次误报、11333 一题 25 次调用正常提交）。适配器已改为
 `content_filter` 且有可用内容时按截断处理（a6b2c76），重跑位于 `experiments/memory_fix2_20261018`。
+该密钥随后被改为仅可访问 `gemini-3.8-flash`（403 实测确认），fix2 改用该模型并把
+`model_prices.json` 沿用 2.5 单价作近似——成本数字仅为量级参考，两组同样受影响。
 消息预算已从 12 条提高到 40 条（12 条在两轮对照中开启组 0/5、1/5，弃用），生成前先用
 `minisweagent.run.extra.memory_replay` 对失败轨迹离线重放，确认刚读的重要代码仍在发送内容中
 （11333 轨迹重放：25 次调用中 5 次压缩，已读代码 97.3% 全文可见，最近一次读取始终完整）。
