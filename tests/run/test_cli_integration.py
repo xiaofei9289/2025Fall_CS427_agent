@@ -1,6 +1,8 @@
 import re
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -12,6 +14,17 @@ def strip_ansi_codes(text: str) -> str:
     """Remove ANSI escape sequences from text."""
     ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
     return ansi_escape.sub("", text)
+
+
+def cli_path(name: str) -> str:
+    """Resolve an installed console script even when the venv is not activated."""
+    if path := shutil.which(name):
+        return path
+    scripts_dir = Path(sys.executable).parent
+    for candidate in (scripts_dir / name, scripts_dir / f"{name}.exe"):
+        if candidate.is_file():
+            return str(candidate)
+    pytest.fail(f"console script {name!r} is not installed; run `python -m pip install -e '.[dev]'`")
 
 
 def test_configure_if_first_time_called():
@@ -435,7 +448,7 @@ def test_python_m_minisweagent_help():
 def test_mini_script_help():
     """Test that the mini script entry point help works."""
     result = subprocess.run(
-        ["mini", "--help"],
+        [cli_path("mini"), "--help"],
         capture_output=True,
         text=True,
         timeout=10,
@@ -448,7 +461,7 @@ def test_mini_script_help():
 def test_mini_swe_agent_help():
     """Test that mini-swe-agent --help works correctly."""
     result = subprocess.run(
-        ["mini-swe-agent", "--help"],
+        [cli_path("mini-swe-agent"), "--help"],
         capture_output=True,
         text=True,
         timeout=10,
@@ -462,7 +475,7 @@ def test_mini_swe_agent_help():
 def test_mini_extra_help():
     """Test that mini-extra --help works correctly."""
     result = subprocess.run(
-        ["mini-extra", "--help"],
+        [cli_path("mini-extra"), "--help"],
         capture_output=True,
         text=True,
         timeout=10,
@@ -480,7 +493,7 @@ def test_mini_extra_help():
 def test_mini_e_help():
     """Test that mini-e --help works correctly."""
     result = subprocess.run(
-        ["mini-e", "--help"],
+        [cli_path("mini-e"), "--help"],
         capture_output=True,
         text=True,
         timeout=10,
@@ -505,7 +518,7 @@ def test_mini_extra_subcommand_help(subcommand: str, aliases: list[str]):
     """Test that mini-extra subcommands --help work correctly."""
     for alias in aliases:
         result = subprocess.run(
-            ["mini-extra", alias, "--help"],
+            [cli_path("mini-extra"), alias, "--help"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -519,7 +532,7 @@ def test_mini_extra_subcommand_help(subcommand: str, aliases: list[str]):
 def test_mini_extra_config_help():
     """Test that mini-extra config --help works correctly."""
     result = subprocess.run(
-        ["mini-extra", "config", "--help"],
+        [cli_path("mini-extra"), "config", "--help"],
         capture_output=True,
         text=True,
         timeout=10,

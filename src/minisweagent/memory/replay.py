@@ -1,8 +1,9 @@
 """Trajectory replay functionality."""
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Optional, Iterator
+from typing import Any
 
 
 class TrajectoryReplayer:
@@ -15,7 +16,7 @@ class TrajectoryReplayer:
             trajectory_file: Path to trajectory JSON file
         """
         self.trajectory_file = Path(trajectory_file)
-        self._trajectory_data: Optional[dict] = None
+        self._trajectory_data: dict | None = None
 
     def load_trajectory(self) -> bool:
         """Load trajectory data from file.
@@ -27,10 +28,10 @@ class TrajectoryReplayer:
             return False
 
         try:
-            with open(self.trajectory_file, 'r') as f:
+            with open(self.trajectory_file) as f:
                 self._trajectory_data = json.load(f)
             return True
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return False
 
     def get_trajectory_info(self) -> dict[str, Any]:
@@ -68,7 +69,7 @@ class TrajectoryReplayer:
 
         return self._trajectory_data.get("messages", [])
 
-    def replay_steps(self, start_step: int = 0, max_steps: Optional[int] = None) -> Iterator[dict[str, Any]]:
+    def replay_steps(self, start_step: int = 0, max_steps: int | None = None) -> Iterator[dict[str, Any]]:
         """Replay trajectory steps one by one.
 
         Args:
@@ -180,5 +181,5 @@ class TrajectoryReplayer:
             # Make script executable
             output_file.chmod(0o755)
             return True
-        except IOError:
+        except OSError:
             return False
