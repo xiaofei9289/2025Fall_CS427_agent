@@ -1,12 +1,11 @@
 """Integration tests for memory functionality."""
 
-import tempfile
-from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from minisweagent.agents.default import DefaultAgent, AgentConfig
-from minisweagent.memory import HistoryManager, SessionMemory
+
+from minisweagent.agents.default import AgentConfig, DefaultAgent
+from minisweagent.memory import SessionMemory
 
 
 class TestMemoryIntegration:
@@ -73,7 +72,7 @@ class TestMemoryIntegration:
         """Test that history compression works during model queries."""
         config = AgentConfig(
             enable_memory=True,
-            memory_max_messages=3,  # Very small limit to force compression
+            memory_max_messages=4,  # Task, system prompt, and the latest complete turn
             memory_dir=str(tmp_path)
         )
         agent = DefaultAgent(mock_model, mock_env, config_class=lambda **kwargs: config)
@@ -95,10 +94,41 @@ class TestMemoryIntegration:
         mock_model.query.assert_called_once()
         compressed_messages = mock_model.query.call_args[0][0]
 
-        # Should have system message + 2 most recent messages = 3 total
-        assert len(compressed_messages) == 3
+        assert len(compressed_messages) == 4
         assert compressed_messages[0]["role"] == "system"
+        assert compressed_messages[1]["content"] == "User 1"
+        assert compressed_messages[-2]["content"] == "Assistant 2"
         assert compressed_messages[-1]["content"] == "User 3"
+
+    def test_memory_compression_failure_falls_back_to_full_transcript(self, mock_model, mock_env):
+        """A memory limit too small for the latest turn must not break the agent."""
+        config = AgentConfig(enable_memory=True, memory_max_messages=3)
+        agent = DefaultAgent(mock_model, mock_env, config_class=lambda **kwargs: config)
+        agent.messages = [
+            {"role": "system", "content": "System message"},
+            {"role": "user", "content": "User 1"},
+            {"role": "assistant", "content": "Assistant 1"},
+            {"role": "user", "content": "User 2"},
+        ]
+
+        agent.query()
+
+        # The full transcript was sent (minus the assistant reply appended after the call).
+        mock_model.query.assert_called_once()
+        assert mock_model.query.call_args[0][0] == agent.messages[:-1]
+        assert all(message["role"] != "user" or not message["content"].startswith("[memory]") for message in agent.messages)
+
+    def test_execution_metadata_supports_default_observation_template(self, mock_model, mock_env):
+        import minisweagent.tools.basic  # noqa: F401
+
+        agent = DefaultAgent(mock_model, mock_env, enable_memory=True)
+        agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "task"}]
+        mock_model.query.return_value = {
+            "content": '```tool\n{"name": "read_file", "args": {"path": "src/app.py"}}\n```',
+        }
+        agent.get_observation(agent.query())
+        assert agent.messages[-1]["extra"]["returncode"] == 0
+        assert "step 1: Read src/app.py" in agent.history_manager.evidence_note(agent.messages)
 
     def test_session_save_on_completion(self, mock_model, mock_env, tmp_path):
         """Test that session is saved when agent completes."""
@@ -148,12 +178,15 @@ class TestMemoryIntegration:
         )
         agent = DefaultAgent(mock_model, mock_env, config_class=lambda **kwargs: config)
 
-        # Start a run to trigger session loading
-        mock_model.query.return_value = {"content": "New response"}
-        try:
-            agent.run("New task")
-        except Exception:
-            pass  # Expected due to mocking
+        # Start a run to trigger session loading, then finish in one step.
+        mock_model.query.return_value = {
+            "content": "```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"
+        }
+        mock_env.execute.return_value = {
+            "output": "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\nTask completed",
+            "returncode": 0,
+        }
+        agent.run("New task")
 
         # Check that previous messages were loaded
         assert len(agent.messages) >= 3

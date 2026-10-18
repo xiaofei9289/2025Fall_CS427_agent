@@ -1,0 +1,118 @@
+# Agent 深化：基线与代码定位
+
+第一阶段交付基线审计、受控实验入口、Python AST/BM25 定位与仓库地图。
+后续依次推进证据记忆、测试驱动阶段流程和失败恢复。
+
+## 历史基线
+
+原始文件保持为证据；审计结果输出到独立目录。
+
+```bash
+python -m minisweagent.run.extra.audit \
+  --run-dir deliverables_midterm/generation \
+  --evaluation-dir deliverables_midterm \
+  --output experiments/baseline_audit/midterm
+
+python -m minisweagent.run.extra.audit \
+  --run-dir deliverables_final/generations \
+  --evaluation-dir deliverables_final \
+  --output experiments/baseline_audit/final
+```
+
+每次审计生成 `audit.json` 和逐任务 `report.md`。必须指定一个具体运行目录，
+例如期末的 `generations` 与 `rerun-verified-40` 属于不同运行。
+评测结果决定是否解决；轨迹中的路径错误、环境错误、测试失败仅作为人工复查线索。
+`trace_matches_prediction=false` 的记录不能用于解释提交 patch 的表现。
+
+| 运行 | 预测 | 轨迹 | 已解决 | 完整性问题 |
+|---|---:|---:|---:|---|
+| 期中 | 50 | 50 | 19/50 | 无 |
+| 原期末 | 50 | 49 | 25/50 | 1 份缺失轨迹，1 份 patch 不匹配 |
+
+原期末的 25 个未解决任务包括：17 个需要进一步复查、4 个预算耗尽、4 个空提交。
+期中统一为 250 步；期末混用了 50、100、250 步。历史轨迹均未开启 memory。
+这些数据支持描述历史成绩，不能证明某一组件带来的因果收益。
+
+## 固定配置与任务
+
+`configs/baseline.yaml` 固定当前模型 `deepseek/deepseek-chat`、400 步、每任务成本阈值 10 美元、
+temperature=0、Docker 参数和提示词，关闭 memory。
+`configs/retrieval.yaml` 仅在相同配置上增加 `repo_map`、`code_search` 两个工具。
+`configs/verified50_tasks.json` 固定课程选取的 50 个任务及其顺序。
+
+先在固定的 5 题上检查整个运行与评测流程，再扩到全部 50 题。
+下面是实际会调用模型的 pilot 命令；使用不同输出目录保存两个实验组。
+
+```bash
+MSWEA_GLOBAL_COST_LIMIT=10 python -m minisweagent.run.extra.swebench \
+  --subset verified-50 --instance-ids experiments/configs/verified50_tasks.json \
+  --slice 0:5 --workers 1 --config experiments/configs/baseline.yaml \
+  --output runs/pilot-baseline
+
+MSWEA_GLOBAL_COST_LIMIT=10 python -m minisweagent.run.extra.swebench \
+  --subset verified-50 --instance-ids experiments/configs/verified50_tasks.json \
+  --slice 0:5 --workers 1 --config experiments/configs/retrieval.yaml \
+  --output runs/pilot-retrieval
+```
+
+batch runner 生成 `run_manifest.json` 和 `source.zip`，记录运行 ID、任务描述与 base commit、
+配置、依赖版本及源码内容身份。轨迹关联同一运行 ID；各 worker 使用独立配置副本。
+源码快照包含未提交的实现，支持恢复这次实际使用的源码。源码、配置或任务改变后需使用新目录；
+已有预测却没有 manifest 的旧目录也需作为历史记录保留，另开新目录。
+运行前后均应保留对应 Docker 镜像；当前配置使用镜像 tag，跨机器重现还需固定对应 image digest。
+
+使用仓库附带的 SWE-bench harness 对两个输出分别评分：
+
+```bash
+PYTHONPATH=SWE-bench python -m swebench.harness.run_evaluation \
+  --dataset_name princeton-nlp/SWE-bench_Verified \
+  --predictions_path runs/pilot-baseline/preds.json --max_workers 1 \
+  --run_id pilot-baseline --report_dir runs/pilot-baseline
+```
+
+另一个实验组使用其对应 predictions 路径、run_id 和 report_dir。评分后可对该运行目录执行 audit，
+检查其 manifest、轨迹、预测和评测记录。对照指标为解决数、空 patch 数、
+每题 API 调用数、输入/输出 token、总成本，以及总成本除以解决数。
+固定相同模型、任务、提示词和预算；扩大试验时预留独立任务集，避免只围绕这 50 题调参。
+
+## 代码定位
+
+`repo_map` 输出与 issue 相关的 Python 文件、类、函数签名和行范围；
+`code_search` 使用 BM25 与符号名匹配排序，并返回 qualified name、docstring 和行范围。
+模型再用已有读取工具查看候选代码。
+
+索引遵守 Git ignore，包含 tracked 文件和新建的非 ignored Python 文件。
+跳过符号链接、超过 1 MB 的文件和无法解析的文件，并报告跳过原因。
+它在环境内部执行自包含的标准库实现，支持 Python 3.6+；旧解释器的结束行号为近似值。
+当前每次调用重新构建索引，文件修改立即可见；增量索引与 embedding 留给后续有数据支持时加入。
+地图使用字符预算，尚未实现 tokenizer 精确预算。
+
+运行本仓库的人工标注冒烟集，不调用模型：
+
+```bash
+python -m minisweagent.run.extra.localization_eval \
+  --cases experiments/localization_smoke_cases.json \
+  --output experiments/localization_smoke_result.json --k 5
+```
+
+评测分别输出文件级 BM25 与符号级 BM25 的 Recall@K、Hit@K 和 MRR。
+`gold_files` 只用于评分，检索输入仅包含 issue 文本。
+这 4 条案例验证工具链，不能作为 SWE-bench 修复能力提升的证据。
+正式定位评测需为每个任务提供处于正确 base commit 的 checkout，再按相同格式标注目标文件。
+
+## 后续里程碑
+
+五题 pilot 已在台式机完成官方评分：baseline 3/5，retrieval 4/5。那次 retrieval 没有调用定位工具。
+强制第一步调用查找之后的重跑在 `experiments/gate-20261017`：baseline 4/5，retrieval 3 题通过、1 题未通过、1 题空补丁。五条 retrieval 轨迹都调用了 `code_search`。两组都是一次运行，不能据此宣称查找带来提升。
+
+同工具、同硬预算的收尾对照在 `experiments/budget_20261017` 已完成。原始关闭组有一题导出换行错误；统一补齐末尾 LF 后的独立验收为关闭组 3/5、开启组 5/5。提示只在一题触发，且修复在提示前已形成；没有减少整组调用数、生成耗时或空补丁的证据。下一轮应使用相同的第 45 步对话和工作区进行分叉，再用未参与调参的任务验证。
+
+记忆修复后的五题对照位于 `experiments/memory_fix_20261018`，等待台式机评测镜像就绪后运行；
+50 题扩量配置已预置于 `experiments/memory_scale50_20261018`，仅在五题对照显示开启组不低于
+关闭组后单次运行，报告同时给出全 50 题与剔除前 5 题调参任务的结果。
+
+1. 五题查找对照和离线定位已完成。文件级 Hit@5 为 4/5；Matplotlib 的官方文件排第 54，见 `experiments/localization_verified5`。
+2. 用相同预算扩到固定任务集之前，先解释邮件题在主文件已命中时仍失败的原因。
+3. 将历史压缩改为动作/观察配对、token 预算和可追溯证据状态，并加入单独消融组。
+4. 增加复现、修改、验证、提交的阶段状态；区分环境失败与代码失败，预留验证预算。
+5. 用完整对照结果、代表性失败案例与可运行 demo 展示项目。
