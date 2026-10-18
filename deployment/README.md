@@ -17,7 +17,8 @@ ssh desktop-pc "cd D:/cs427-workspace; python deployment/desktop_run.py slow-che
 ```
 
 - 同步会替换 `src/`、`tests/`、`deployment/`、`SWE-bench/`、`docs/`，保留 `experiments/`
-  下的运行结果和 `desktop_validation/`；实验配置和 runner 会覆盖更新。
+  下的运行结果和 `desktop_validation/`；实验配置和 runner 会覆盖更新。目标目录有实验在
+  运行时先停止，避免中断正在使用的 `src/`。
 - `D:\cs427-upgrade-20261017` 保留为历史实验副本，不要覆盖；新测试统一在
   `D:\cs427-workspace`。
 - 脚本拒绝脏工作区；先提交再同步。`uv.lock` 允许保持未跟踪，但会打进压缩包并参与指纹。
