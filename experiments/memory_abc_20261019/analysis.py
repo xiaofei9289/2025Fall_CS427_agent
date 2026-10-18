@@ -375,6 +375,7 @@ def build_report(study: Path, arms: dict[str, str] | None = None, *, suffix: str
         and all(metric.evaluation_errors == 0 for metric in metrics.values())
         and not missing
     )
+    retrieval_used = metrics["c"].search_calls > 0 if "c" in metrics else False
 
     report: dict[str, Any] = {
         "study": str(study),
@@ -382,6 +383,7 @@ def build_report(study: Path, arms: dict[str, str] | None = None, *, suffix: str
         "tasks": len(manifests[baseline_arm]["instance_ids"]),
         "pilot_tasks": sorted(pilot),
         "valid": valid,
+        "retrieval_used": retrieval_used,
         "arms": {arm: metrics[arm].as_dict() for arm in arms},
         "estimator": calibration,
         "contrasts": {contrast.name: contrast.as_dict() for contrast in contrasts},
@@ -430,6 +432,14 @@ def _render_markdown(
         f"Tasks: {report['tasks']}; pilot (excluded from the secondary table): {len(pilot)}.",
         f"Valid: **{report['valid']}** (a false value means at least one arm broke the pre-registered budget).",
         "",
+    ]
+    if not report.get("retrieval_used", True):
+        lines += [
+            "> **Attribution warning:** the C arm made **0** memory_search calls. C-B cannot be",
+            "> attributed to history retrieval; treat it as a tool-description/prompt effect or noise.",
+            "",
+        ]
+    lines += [
         "## Arms",
         "",
         "| Arm | Policy | Resolved | Empty | Eval errors | Cost (USD) | API calls | Dropped calls | Clipped calls | Summary calls | Retrieval calls | Search tool calls | Violations |",

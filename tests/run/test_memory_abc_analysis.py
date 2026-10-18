@@ -83,7 +83,7 @@ def write_task(arm_dir: Path, arm: str, task: str, *, resolved: bool, dropped: i
     (task_dir / f"{task}.traj.json").write_text(json.dumps(trajectory))
 
 
-def make_study(root: Path, outcomes, *, violation: bool = False):
+def make_study(root: Path, outcomes, *, violation: bool = False, c_search: bool = True):
     study = root
     study.mkdir()
     (study / "pilot.json").write_text(json.dumps(["t1"]))
@@ -113,7 +113,7 @@ def make_study(root: Path, outcomes, *, violation: bool = False):
                 resolved=outcomes[task][arm],
                 dropped=3 if task in {"t2", "t3", "t4"} else 0,
                 budget=9000 if violation and arm == "c" and task == "t4" else 1000,
-                search=arm == "c" and task == "t4",
+                search=c_search and arm == "c" and task == "t4",
                 retrieval=100 if arm == "c" and task == "t4" else 0,
             )
     return study
@@ -159,6 +159,20 @@ def test_bc_only_report_keeps_c_minus_b_primary(tmp_path):
     assert set(report["arms"]) == {"b", "c"}
     assert list(report["contrasts"]) == ["C-B (history search beyond the same summary)"]
     assert (study / "comparison.md").is_file()
+
+
+def test_zero_search_calls_are_called_out_in_the_report(tmp_path):
+    outcomes = {
+        "t1": {"a": True, "b": True, "c": True},
+        "t2": {"a": True, "b": False, "c": False},
+        "t3": {"a": False, "b": True, "c": True},
+        "t4": {"a": False, "b": False, "c": True},
+        "t5": {"a": False, "b": False, "c": False},
+    }
+    study = make_study(tmp_path / "study", outcomes, c_search=False)
+    report = analysis.build_report(study)
+    assert report["retrieval_used"] is False
+    assert "Attribution warning" in (study / "comparison.md").read_text()
 
 
 def test_budget_violation_invalidates_the_report(tmp_path):

@@ -16,6 +16,7 @@ All arms share one 8000 estimated-token prompt budget, one task set, one model, 
 - The task is pinned in every view; if it cannot fit, the agent fails loudly instead of silently losing the goal.
 - Every view is written to `memory_trace.jsonl`: token accounting, sent/dropped indices, summary text, task presence, retrieval tokens. The report audits budget compliance rather than trusting the agent.
 - The summary is deterministic and pure: B and C summarize the same dropped turns identically, and a replay yields the same summary. It is not a second model call. See [DESIGN.md](DESIGN.md) §6 for why this is the deliberate choice for a clean C−B comparison.
+- The first 10-task pilot found that C never called `memory_search`; see [PILOT_20261018.md](PILOT_20261018.md). The next pilot must show search usage before C−B is treated as a retrieval effect.
 
 ## Run
 
