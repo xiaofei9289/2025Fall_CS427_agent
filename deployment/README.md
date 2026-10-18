@@ -2,6 +2,28 @@
 
 按项目约定，所有后续测试、SWE-bench 验收和镜像构建在台式机执行。本地 Mac 仅编辑代码，不缓存 Docker 镜像。服务和集成测试需要 Linux，可使用台式机的 WSL 或 Docker Desktop Linux 容器；原生 Windows 不支持当前 worker 使用的 POSIX 进程组及文件锁。
 
+## Mac → 台式机同步（推荐流程）
+
+Mac 负责修改和提交，台式机只运行测试。同步脚本把**已提交**的代码、测试、部署和实验配置
+打包到 `D:\cs427-workspace`，替换代码目录并校验与 `run_manifest.json` 相同的 source 指纹。
+
+```bash
+# Mac：工作区必须干净（只允许未跟踪的 uv.lock）
+python deployment/sync_desktop.py --target D:/cs427-workspace
+
+# 台式机：在同步目标中测试
+ssh desktop-pc "cd D:/cs427-workspace; python deployment/desktop_run.py checks"
+ssh desktop-pc "cd D:/cs427-workspace; python deployment/desktop_run.py slow-checks"
+```
+
+- 同步会替换 `src/`、`tests/`、`deployment/`、`SWE-bench/`、`docs/`，保留 `experiments/`
+  下的运行结果和 `desktop_validation/`；实验配置和 runner 会覆盖更新。
+- `D:\cs427-upgrade-20261017` 保留为历史实验副本，不要覆盖；新测试统一在
+  `D:\cs427-workspace`。
+- 脚本拒绝脏工作区；先提交再同步。`uv.lock` 允许保持未跟踪，但会打进压缩包并参与指纹。
+- 同步结束会打印 `source.sha256`；台式机返回的结果必须与 Mac 一致，否则脚本失败。
+- 可选参数：`--host`（默认 `desktop-pc`）、`--target`、`--remote-tar`。
+
 ## 安装与测试
 
 Windows 台式机可通过 `deployment/desktop_run.py` 使用 Docker Linux 引擎完成同一组检查。该脚本拒绝在 Mac 执行，并使用独立的匿名 Docker 配置解决 SSH 会话无法读取 Windows 凭据库的问题，不修改用户已有登录配置。
