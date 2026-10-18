@@ -28,6 +28,7 @@ class SymbolVisitor(ast.NodeVisitor):
         self.owners: "list[str]" = []
         self.owner_kinds: "list[str]" = []
         self.symbols: "list[dict]" = []
+        self.variables: "list[dict]" = []
 
     def visit_definition(self, node: "ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef") -> None:
         name = ".".join([*self.owners, node.name])
@@ -79,6 +80,47 @@ class SymbolVisitor(ast.NodeVisitor):
     visit_FunctionDef = visit_definition
     visit_AsyncFunctionDef = visit_definition
 
+    def _target_names(self, target: "ast.AST") -> "list[str]":
+        if isinstance(target, ast.Name):
+            return [target.id]
+        if isinstance(target, (ast.Tuple, ast.List)):
+            names: "list[str]" = []
+            for element in target.elts:
+                names.extend(self._target_names(element))
+            return names
+        if isinstance(target, ast.Starred):
+            return self._target_names(target.value)
+        return []
+
+    def _record_variables(self, node: "ast.AST", names: "list[str]") -> None:
+        for name in dict.fromkeys(names):
+            start = node.lineno
+            end = getattr(node, "end_lineno", None) or start
+            source = "\n".join(self.lines[start - 1 : end])[:2000]
+            self.variables.append(
+                {
+                    "path": self.path,
+                    "name": ".".join([*self.owners, name]),
+                    "kind": "variable",
+                    "start_line": start,
+                    "end_line": end,
+                    "signature": source.splitlines()[0].strip()[:500] if source else name,
+                    "docstring": "",
+                    "source": source,
+                }
+            )
+
+    def visit_Assign(self, node: "ast.Assign") -> None:
+        names = []
+        for target in node.targets:
+            names.extend(self._target_names(target))
+        self._record_variables(node, names)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: "ast.AnnAssign") -> None:
+        self._record_variables(node, self._target_names(node.target))
+        self.generic_visit(node)
+
 
 class RepositoryIndex:
     def __init__(self, root: Path):
@@ -86,16 +128,21 @@ class RepositoryIndex:
         if not self.root.is_dir():
             raise ValueError(f"Repository directory does not exist: {self.root}")
         self.symbols: "list[dict]" = []
+        self.variables: "list[dict]" = []
         self.skipped: "list[dict]" = []
         self.file_count = 0
-        tracked = subprocess.run(
-            ["git", "-C", str(self.root), "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "*.py"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-        )
-        paths = [self.root / p for p in tracked.stdout.split("\0") if p]
-        if tracked.returncode != 0:
+        try:
+            tracked = subprocess.run(
+                ["git", "-C", str(self.root), "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "*.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+        except OSError:
+            tracked = None
+        if tracked is not None and tracked.returncode == 0:
+            paths = [self.root / p for p in tracked.stdout.split("\0") if p]
+        else:
             paths = []
             for directory, directories, files in os.walk(str(self.root)):
                 directories[:] = [name for name in directories if name not in EXCLUDED_DIRS]
@@ -120,6 +167,7 @@ class RepositoryIndex:
             visitor = SymbolVisitor(relative.as_posix(), source)
             visitor.visit(tree)
             self.symbols.extend(visitor.symbols)
+            self.variables.extend(visitor.variables)
             self.symbols.append(
                 {
                     "path": relative.as_posix(),
@@ -165,6 +213,37 @@ class RepositoryIndex:
     def ranked_files(self, query: str, file_only: bool = False) -> "list[str]":
         return list(dict.fromkeys(symbol["path"] for symbol in self.search(query, len(self.symbols), file_only)))
 
+    def find(self, symbol: str, symbol_type: str = "any", limit: "int | None" = None) -> "list[dict]":
+        """Return exact symbol definitions, optionally filtered by kind."""
+        if symbol_type not in {"any", "function", "class", "variable"}:
+            raise ValueError("symbol_type must be one of: any, function, class, variable")
+        if limit is not None and (not isinstance(limit, int) or limit < 1):
+            raise ValueError("limit must be a positive integer")
+        if not symbol:
+            return []
+        matches = []
+        for entry in self.symbols + self.variables:
+            if entry["kind"] == "module":
+                continue
+            if symbol_type == "function" and entry["kind"] not in {"function", "method"}:
+                continue
+            if symbol_type == "class" and entry["kind"] != "class":
+                continue
+            if symbol_type == "variable" and entry["kind"] != "variable":
+                continue
+            name = entry["name"]
+            if name != symbol and name.rsplit(".", 1)[-1] != symbol:
+                continue
+            matches.append(entry)
+        matches.sort(key=lambda entry: (
+            0 if entry["kind"] != "variable" else 1,
+            0 if entry["name"] == symbol else 1,
+            entry["path"],
+            entry["start_line"],
+            entry["name"],
+        ))
+        return matches[:limit] if limit is not None else matches
+
     def repo_map(self, query: str, max_chars: int = 6000) -> str:
         candidates = (
             self.search(query, limit=len(self.symbols))
@@ -188,6 +267,71 @@ class RepositoryIndex:
         if omitted:
             output += marker
         return output[:max_chars]
+
+
+def _definition_context(path: Path, start_line: int, context_lines: int, fallback: str) -> str:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return fallback
+    index = start_line - 1
+    start = max(0, index - context_lines)
+    end = min(len(lines), index + context_lines + 1)
+    parts = []
+    for position in range(start, end):
+        marker = ">>>" if position == index else "   "
+        parts.append(f"{marker} {position + 1:4d}: {lines[position]}")
+    return "\n".join(parts) or fallback
+
+
+def find_definition(
+    root: str = ".",
+    symbol: str = "",
+    symbol_type: str = "any",
+    path: str = ".",
+    context_lines: int = 5,
+    limit: int = 10,
+) -> dict:
+    """Locate exact Python definitions and return readable line context."""
+    if not isinstance(symbol, str) or not symbol:
+        return {"output": "Missing 'symbol' parameter", "returncode": 2}
+    if symbol_type not in {"any", "function", "class", "variable"}:
+        return {"output": "symbol_type must be one of: any, function, class, variable", "returncode": 2}
+    if not isinstance(context_lines, int) or context_lines < 0:
+        return {"output": "context_lines must be a non-negative integer", "returncode": 2}
+    if not isinstance(limit, int) or not 1 <= limit <= 50:
+        return {"output": "limit must be between 1 and 50", "returncode": 2}
+    if not path:
+        path = "."
+    root_path = Path(root).expanduser().resolve()
+    target = Path(path).expanduser()
+    target = target.resolve() if target.is_absolute() else (root_path / target).resolve()
+    if not target.exists():
+        return {"output": f"Path not found: {path}", "returncode": 2}
+    index_root = target if target.is_dir() else target.parent
+    try:
+        index = RepositoryIndex(index_root)
+        matches = index.find(symbol, symbol_type)
+    except (OSError, ValueError) as exc:
+        return {"output": f"Error finding definition: {exc}", "returncode": 1}
+    if target.is_file():
+        matches = [entry for entry in matches if (index_root / entry["path"]).resolve() == target]
+    if not matches:
+        return {"output": f"No definition found for '{symbol}' (type: {symbol_type}) in {path}", "returncode": 0}
+    output_lines = [f"Found {len(matches)} definition(s) for '{symbol}':\n"]
+    for entry in matches[:limit]:
+        full_path = (index_root / entry["path"]).resolve()
+        try:
+            display_path = full_path.relative_to(root_path).as_posix()
+        except ValueError:
+            display_path = str(full_path)
+        output_lines.append(f"{display_path}:{entry['start_line']}: {entry['kind']} {entry['name']}")
+        output_lines.append(
+            _definition_context(full_path, entry["start_line"], context_lines, entry.get("signature", ""))
+        )
+    if len(matches) > limit:
+        output_lines.append(f"\n... and {len(matches) - limit} more result(s)")
+    return {"output": "\n".join(output_lines), "returncode": 0}
 
 
 def retrieve(args: dict) -> dict:

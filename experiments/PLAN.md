@@ -79,6 +79,7 @@ PYTHONPATH=SWE-bench python -m swebench.harness.run_evaluation \
 
 `repo_map` 输出与 issue 相关的 Python 文件、类、函数签名和行范围；
 `code_search` 使用 BM25 与符号名匹配排序，并返回 qualified name、docstring 和行范围。
+`find_definition` 复用同一索引做精确符号查询，支持 async、类型注解/元组赋值变量和 qualified name；不再在容器内 grep。
 模型再用已有读取工具查看候选代码。
 
 索引遵守 Git ignore，包含 tracked 文件和新建的非 ignored Python 文件。
