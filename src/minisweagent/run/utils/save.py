@@ -59,6 +59,8 @@ def save_traj(
         data["info"]["model_stats"]["instance_cost"] = agent.model.cost
         data["info"]["model_stats"]["api_calls"] = agent.model.n_calls
         data["messages"] = agent.messages
+        if budget_state := getattr(agent, "budget_state", None):
+            data["info"]["budget"] = budget_state()
         data["info"]["config"] = {
             "agent": _asdict(agent.config),
             "model": _asdict(agent.model.config),

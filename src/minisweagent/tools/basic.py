@@ -11,11 +11,11 @@ Safety considerations (kept simple on purpose for a starter set):
 from __future__ import annotations
 
 import base64
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
-import shlex
 
-from . import register
+from . import ensure_within_workspace, register
 
 
 @dataclass
@@ -39,8 +39,9 @@ class ReadFile:
         if env is not None:
             if not path_arg:
                 return {"output": "Missing 'path'", "returncode": 2}
-            cmd = f"cat -- {shlex.quote(path_arg)}"
-            return env.execute(cmd)
+            if rejected := ensure_within_workspace(env, path_arg):
+                return rejected
+            return env.execute(f"cat -- {shlex.quote(path_arg)}")
         # Fallback: host filesystem read
         try:
             p = Path(path_arg).expanduser().resolve()
@@ -88,6 +89,9 @@ class WriteFile:
     
     def _execute_in_env(self, env, path_arg: str, content: str) -> dict:
         """Execute write in environment using bash commands."""
+        # Writes must stay inside the environment workspace (e.g., /testbed)
+        if rejected := ensure_within_workspace(env, path_arg):
+            return rejected
         # Create parent directories first
         parent_dir = Path(path_arg).parent
         if str(parent_dir) != ".":

@@ -12,9 +12,11 @@ from jinja2 import StrictUndefined, Template
 
 from minisweagent import Environment, Model
 from minisweagent.memory import HistoryManager, SessionMemory
+from minisweagent.memory.history import estimate_tokens
 from minisweagent.memory.search import set_search_context
 from minisweagent.tools import REGISTRY as TOOL_REGISTRY
 from minisweagent.tools import list_tool_specs
+from minisweagent.utils.log import logger
 
 
 @dataclass
@@ -32,7 +34,7 @@ class AgentConfig:
         "1) Bash command:\n"
         "```bash\n<your command>\n```\n"
         "2) Tool call:\n"
-        "```tool\n{\"name\": \"<tool_name>\", \"args\": { ... }}\n```\n"
+        '```tool\n{"name": "<tool_name>", "args": { ... }}\n```\n'
         "Prefer tools for reading/writing files or similar operations.\n"
         "To finish, ensure the first line of the resulting output is 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'."
     )
@@ -55,6 +57,8 @@ class AgentConfig:
     # Memory settings
     enable_memory: bool = False
     memory_max_messages: int = 50
+    context_token_limit: int = 0
+    history_policy: str = "truncate"
     memory_dir: str = ""
     memory_session_id: str = ""
     memory_load_session: bool = False
@@ -110,15 +114,14 @@ class DefaultAgent:
         # Initialize memory components if enabled
         self.history_manager = None
         self.session_memory = None
-        if self.config.enable_memory:
-            self.history_manager = HistoryManager(
-                max_messages=self.config.memory_max_messages
+        if self.config.context_token_limit > 0 and self.config.history_policy not in {"truncate", "compress"}:
+            raise ValueError(f"Unknown history policy: {self.config.history_policy}")
+        if self.config.enable_memory or self.config.context_token_limit > 0:
+            self.history_manager = HistoryManager(max_messages=self.config.memory_max_messages)
+        if self.config.enable_memory and self.config.memory_dir:
+            self.session_memory = SessionMemory(
+                memory_dir=Path(self.config.memory_dir), session_id=self.config.memory_session_id or None
             )
-            if self.config.memory_dir:
-                self.session_memory = SessionMemory(
-                    memory_dir=Path(self.config.memory_dir),
-                    session_id=self.config.memory_session_id or None
-                )
 
     def render_template(self, template: str, **kwargs) -> str:
         template_vars = asdict(self.config) | self.env.get_template_vars() | self.model.get_template_vars()
@@ -160,9 +163,13 @@ class DefaultAgent:
                 self.add_message("user", str(e))
             except TerminatingException as e:
                 self.add_message("user", str(e))
-                # Save session before exiting if memory is enabled
+                # Persist the session if memory is enabled, but a persistence failure
+                # must never mask the agent's own completed result.
                 if self.config.enable_memory and self.session_memory:
-                    self.session_memory.save_session(self.messages, {"exit_status": type(e).__name__})
+                    try:
+                        self.session_memory.save_session(self.messages, {"exit_status": type(e).__name__})
+                    except OSError as error:
+                        logger.warning(f"Failed to save session {self.session_memory.session_id}: {error}")
                 return type(e).__name__, str(e)
 
     def step(self) -> dict:
@@ -171,11 +178,17 @@ class DefaultAgent:
 
     def budget_state(self) -> dict:
         return {
-            "phase": self.budget_phase, "limit_reason": self.limit_reason,
-            "remaining_steps": max(0, self.config.step_limit - self.model.n_calls) if self.config.step_limit > 0 else None,
-            "remaining_cost": max(0.0, self.config.cost_limit - self.model.cost) if self.config.cost_limit > 0 else None,
+            "phase": self.budget_phase,
+            "limit_reason": self.limit_reason,
+            "remaining_steps": max(0, self.config.step_limit - self.model.n_calls)
+            if self.config.step_limit > 0
+            else None,
+            "remaining_cost": max(0.0, self.config.cost_limit - self.model.cost)
+            if self.config.cost_limit > 0
+            else None,
             "remaining_seconds": max(0.0, self.config.time_limit - (time.monotonic() - self.started_at))
-            if self.config.time_limit > 0 else None,
+            if self.config.time_limit > 0
+            else None,
         }
 
     def check_budget(self) -> None:
@@ -184,48 +197,66 @@ class DefaultAgent:
             if remaining[f"remaining_{name}"] == 0:
                 self.limit_reason = name
                 raise LimitsExceeded(f"Budget exhausted: {name}")
-        reserves = {"steps": self.config.finalization_step_reserve, "cost": self.config.finalization_cost_reserve,
-                    "seconds": self.config.finalization_time_reserve}
+        reserves = {
+            "steps": self.config.finalization_step_reserve,
+            "cost": self.config.finalization_cost_reserve,
+            "seconds": self.config.finalization_time_reserve,
+        }
         if self.budget_phase != "finalizing" and any(
             reserve > 0 and remaining[f"remaining_{name}"] is not None and remaining[f"remaining_{name}"] <= reserve
             for name, reserve in reserves.items()
         ):
             self.budget_phase = "finalizing"
-            self.add_message("user", (
-                "FINALIZATION: The remaining budget is reserved for finishing the task. "
-                f"Remaining model calls: {remaining['remaining_steps']}; "
-                f"cost budget: {remaining['remaining_cost']}; seconds: {remaining['remaining_seconds']}. "
-                "Stop broad searches and comparisons with other versions. Inspect the current git diff; "
-                "if no fix exists, use the evidence already collected to implement the smallest justified fix. "
-                "Run focused tests if time permits, then submit the patch using the task's submission command. "
-                "Do not claim tests passed unless their output confirms it. Hard limits still apply."
-            ))
+            self.add_message(
+                "user",
+                (
+                    "FINALIZATION: The remaining budget is reserved for finishing the task. "
+                    f"Remaining model calls: {remaining['remaining_steps']}; "
+                    f"cost budget: {remaining['remaining_cost']}; seconds: {remaining['remaining_seconds']}. "
+                    "Stop broad searches and comparisons with other versions. Inspect the current git diff; "
+                    "if no fix exists, use the evidence already collected to implement the smallest justified fix. "
+                    "Run focused tests if time permits, then submit the patch using the task's submission command. "
+                    "Do not claim tests passed unless their output confirms it. Hard limits still apply."
+                ),
+            )
 
     def query(self) -> dict:
         """Query the model and return the response."""
         self.check_budget()
 
-        # Keep the full transcript searchable, and send a salient subset when memory is on.
+        # The full transcript stays searchable. A token limit decides what is sent.
         set_search_context(self.messages, self.session_memory)
-        messages_to_send = self.messages
-        if self.config.enable_memory and self.history_manager:
-            # Memory must fail gracefully: an impossible compression limit falls back
-            # to the full transcript instead of breaking the agent.
+
+        def without_empty_assistants(messages: list[dict]) -> list[dict]:
+            return [
+                message
+                for message in messages
+                if not (message.get("role") == "assistant" and not (message.get("content") or "").strip())
+            ]
+
+        if self.config.context_token_limit > 0 and self.history_manager:
+            messages_to_send = self.history_manager.fit(
+                without_empty_assistants(self.messages),
+                policy=self.config.history_policy,
+                token_limit=self.config.context_token_limit,
+            )
+        elif self.config.enable_memory and self.history_manager:
+            # Message-count compression must fail open: an impossible limit sends the full transcript.
             try:
                 messages_to_send = self.history_manager.prompt_messages(self.messages)
             except ValueError:
                 messages_to_send = self.messages
-
-        # Keep failed responses in the audit transcript, but do not feed empty
-        # assistant turns back to the provider on the next attempt.
-        messages_to_send = [
-            message for message in messages_to_send
-            if not (message.get("role") == "assistant" and not (message.get("content") or "").strip())
-        ]
+            messages_to_send = without_empty_assistants(messages_to_send)
+        else:
+            messages_to_send = without_empty_assistants(self.messages)
         response = self.model.query(messages_to_send)
-        if self.config.enable_memory and self.history_manager:
+        if self.history_manager and (self.config.enable_memory or self.config.context_token_limit > 0):
             extra = response.setdefault("extra", {})
             extra["memory"] = {
+                "policy": self.config.history_policy if self.config.context_token_limit else "messages",
+                "token_limit": self.config.context_token_limit,
+                "estimated_full_tokens": estimate_tokens(self.messages),
+                "estimated_sent_tokens": estimate_tokens(messages_to_send),
                 "full_messages": len(self.messages),
                 "sent_messages": len(messages_to_send),
                 "evidence": any(

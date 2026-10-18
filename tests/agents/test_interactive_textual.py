@@ -5,7 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from minisweagent.agents.interactive_textual import AddLogEmitCallback, SmartInputContainer, TextualAgent
+from minisweagent.agents.default import NonTerminatingException
+from minisweagent.agents.interactive_textual import AddLogEmitCallback, SmartInputContainer, TextualAgent, _TextualAgent
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel
 
@@ -848,3 +849,19 @@ async def test_smart_input_container_on_mount():
         # Check initialization
         assert container._multi_input.display is False
         assert container._update_mode_display.called
+
+
+def test_tui_confirm_accepts_tool_action():
+    """The default confirm mode must not crash on tool calls (no 'action' key)."""
+    app = Mock()
+    app.input_container.request_input.return_value = ""  # ENTER confirms
+    agent = _TextualAgent(app, Mock(), Mock(), mode="confirm")
+    output = agent.execute_action({"kind": "tool", "tool_name": "unknown-tool", "tool_args": {}})
+    assert output["returncode"] == 127
+    assert "Unknown tool" in output["output"]
+
+    # A rejection reason must stop the action without executing it
+    app.input_container.request_input.return_value = "not this one"
+    agent2 = _TextualAgent(app, Mock(), Mock(), mode="confirm")
+    with pytest.raises(NonTerminatingException):
+        agent2.execute_action({"kind": "tool", "tool_name": "read_file", "tool_args": {"path": "x"}})

@@ -1,6 +1,8 @@
+from unittest.mock import Mock
+
 import pytest
 
-from minisweagent.agents.default import DefaultAgent, NonTerminatingException
+from minisweagent.agents.default import DefaultAgent, NonTerminatingException, Submitted
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel
 
@@ -272,3 +274,14 @@ def test_render_template_model_stats():
     result = agent.render_template(template)
 
     assert result == "Calls: 2, Cost: 2.0"
+
+
+def test_session_save_failure_does_not_mask_completed_task(tmp_path):
+    """A session persistence failure must not overwrite the agent's submitted result."""
+    model, env = Mock(), Mock()
+    model.get_template_vars.return_value = {}
+    env.get_template_vars.return_value = {}
+    agent = DefaultAgent(model, env, enable_memory=True, memory_dir=str(tmp_path))
+    agent.step = Mock(side_effect=Submitted("DONE"))
+    agent.session_memory.save_session = Mock(side_effect=OSError("disk full"))
+    assert agent.run("task") == ("Submitted", "DONE")

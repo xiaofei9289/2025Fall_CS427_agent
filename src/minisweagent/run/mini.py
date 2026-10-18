@@ -6,7 +6,7 @@
 import os
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import typer
 import yaml
@@ -15,6 +15,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.shortcuts import PromptSession
 from rich.console import Console
 
+import minisweagent.tools.code_search  # noqa: F401
 from minisweagent import global_config_dir
 from minisweagent.agents.interactive import InteractiveAgent
 from minisweagent.agents.interactive_textual import TextualAgent
@@ -42,6 +43,12 @@ try:  # pragma: no cover - convenience import
     import minisweagent.tools.todo  # noqa: F401
 except Exception:  # noqa: BLE001
     logger.error("Failed to import todo tool", exc_info=True)
+
+# Register memory search tool
+try:  # pragma: no cover - convenience import
+    import minisweagent.tools.memory_search  # noqa: F401
+except Exception:  # noqa: BLE001
+    logger.error("Failed to import memory search tool", exc_info=True)
 DEFAULT_CONFIG = Path(os.getenv("MSWEA_MINI_CONFIG_PATH", builtin_config_dir / "mini.yaml"))
 # Default trajectory output to repo directory for easier access
 DEFAULT_OUTPUT = Path.cwd() / ".mini-swe-agent" / "last_mini_run.traj.json"
@@ -62,23 +69,25 @@ More information about the usage: [bold green]https://mini-swe-agent.com/latest/
 
 
 # fmt: off
+# Annotated options keep plain Python defaults, so calling main() directly from
+# tests or scripts never sees typer.OptionInfo objects.
 @app.command(help=_HELP_TEXT)
 def main(
-    visual: bool = typer.Option(False, "-v", "--visual", help="Toggle (pager-style) UI (Textual) depending on the MSWEA_VISUAL_MODE_DEFAULT environment setting",),
-    model_name: str | None = typer.Option( None, "-m", "--model", help="Model to use",),
-    model_class: str | None = typer.Option(None, "--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced"),
-    task: str | None = typer.Option(None, "-t", "--task", help="Task/problem statement", show_default=False),
-    yolo: bool = typer.Option(False, "-y", "--yolo", help="Run without confirmation"),
-    cost_limit: float | None = typer.Option(None, "-l", "--cost-limit", help="Cost limit. Set to 0 to disable."),
-    config_spec: Path = typer.Option(DEFAULT_CONFIG, "-c", "--config", help="Path to config file"),
-    output: Path | None = typer.Option(DEFAULT_OUTPUT, "-o", "--output", help="Output trajectory file"),
-    exit_immediately: bool = typer.Option( False, "--exit-immediately", help="Exit immediately when the agent wants to finish instead of prompting."),
+    visual: Annotated[bool, typer.Option("-v", "--visual", help="Toggle (pager-style) UI (Textual) depending on the MSWEA_VISUAL_MODE_DEFAULT environment setting")] = False,
+    model_name: Annotated[str | None, typer.Option("-m", "--model", help="Model to use")] = None,
+    model_class: Annotated[str | None, typer.Option("--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced")] = None,
+    task: Annotated[str | None, typer.Option("-t", "--task", help="Task/problem statement", show_default=False)] = None,
+    yolo: Annotated[bool, typer.Option("-y", "--yolo", help="Run without confirmation")] = False,
+    cost_limit: Annotated[float | None, typer.Option("-l", "--cost-limit", help="Cost limit. Set to 0 to disable.")] = None,
+    config_spec: Annotated[Path, typer.Option("-c", "--config", help="Path to config file")] = DEFAULT_CONFIG,
+    output: Annotated[Path | None, typer.Option("-o", "--output", help="Output trajectory file")] = DEFAULT_OUTPUT,
+    exit_immediately: Annotated[bool, typer.Option("--exit-immediately", help="Exit immediately when the agent wants to finish instead of prompting.")] = False,
     # Memory options
-    enable_memory: bool = typer.Option(False, "--memory", help="Enable memory functionality"),
-    memory_dir: str = typer.Option("", "--memory-dir", help="Directory to store memory files"),
-    memory_session_id: str = typer.Option("", "--memory-session", help="Session ID for memory"),
-    memory_load_session: bool = typer.Option(False, "--memory-load", help="Load previous session"),
-    memory_max_messages: int = typer.Option(50, "--memory-max", help="Maximum messages to keep in history"),
+    enable_memory: Annotated[bool, typer.Option("--memory", help="Enable memory functionality")] = False,
+    memory_dir: Annotated[str, typer.Option("--memory-dir", help="Directory to store memory files")] = "",
+    memory_session_id: Annotated[str, typer.Option("--memory-session", help="Session ID for memory")] = "",
+    memory_load_session: Annotated[bool, typer.Option("--memory-load", help="Load previous session")] = False,
+    memory_max_messages: Annotated[int, typer.Option("--memory-max", help="Maximum messages to keep in history")] = 50,
 ) -> Any:
     # fmt: on
     configure_if_first_time()

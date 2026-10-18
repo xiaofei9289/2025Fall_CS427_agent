@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import register
+from . import ensure_all_within_workspace, register
 
 
 @dataclass
@@ -103,9 +103,12 @@ class ReadManyFilesTool:
                                        include_metadata, strip_empty_lines, max_total_chars)
 
     def _execute_in_env(self, env: Any, paths: list[str], max_lines_per_file: int,
-                       include_metadata: bool, strip_empty_lines: bool, 
+                       include_metadata: bool, strip_empty_lines: bool,
                        max_total_chars: int) -> dict:
         """Execute read operation inside the environment (Docker/sandbox)."""
+        # Reads must stay inside the environment workspace (e.g., /testbed)
+        if rejected := ensure_all_within_workspace(env, paths):
+            return rejected
         results = []
         total_chars = 0
 

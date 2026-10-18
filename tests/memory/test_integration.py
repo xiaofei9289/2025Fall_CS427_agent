@@ -121,6 +121,12 @@ class TestMemoryIntegration:
     def test_execution_metadata_supports_default_observation_template(self, mock_model, mock_env):
         import minisweagent.tools.basic  # noqa: F401
 
+        # File tools resolve the workspace boundary inside the environment first
+        mock_env.config.cwd = "/testbed"
+        mock_env.execute.side_effect = [
+            {"output": "/testbed/src/app.py", "returncode": 0},  # path resolution
+            {"output": "Test output", "returncode": 0},  # cat
+        ]
         agent = DefaultAgent(mock_model, mock_env, enable_memory=True)
         agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "task"}]
         mock_model.query.return_value = {

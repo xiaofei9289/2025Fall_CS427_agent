@@ -3,6 +3,7 @@ Extension of the `default.py` agent that uses Textual for an interactive TUI.
 For a simpler version of an interactive UI that does not require threading and more, see `interactive.py`.
 """
 
+import json
 import logging
 import os
 import re
@@ -77,13 +78,24 @@ class _TextualAgent(DefaultAgent):
             raise NonTerminatingException("Command not executed because user switched to manual mode.")
         if (
             self.config.mode == "confirm"
-            and action["action"].strip()
-            and not any(re.match(r, action["action"]) for r in self.config.whitelist_actions)
+            and (confirm_text := self._confirm_text(action))
+            and not any(re.match(r, confirm_text) for r in self.config.whitelist_actions)
         ):
             result = self.app.input_container.request_input("Press ENTER to confirm or provide rejection reason")
             if result:  # Non-empty string means rejection
                 raise NonTerminatingException(f"Command not executed: {result}")
         return super().execute_action(action)
+
+    @staticmethod
+    def _confirm_text(action: dict) -> str:
+        """Confirmation text for both bash commands and tool calls.
+
+        Tool actions carry no ``action`` key, so keying on it crashed the TUI's
+        default confirm mode before any tool (including memory_search) ran.
+        """
+        if action.get("kind") == "tool":
+            return json.dumps({"name": action.get("tool_name"), "args": action.get("tool_args")}, sort_keys=True)
+        return action.get("action", "")
 
     def has_finished(self, output: dict[str, str]):
         try:

@@ -12,7 +12,7 @@ from typing import Any
 
 import typer
 
-from minisweagent.memory.history import _FILE_READ_RE, HistoryManager, message_text
+from minisweagent.memory.history import HistoryManager, _bash_read_paths, message_text
 
 app = typer.Typer(add_completion=False)
 
@@ -41,7 +41,7 @@ def read_events(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         kind, name, args = action
         if kind == "tool" and name in {"read_file", "refined_read_file"}:
             events.append({"step": step, "index": index, "label": f"{name} {args.get('path', '')}", "text": text})
-        elif kind == "bash" and _FILE_READ_RE.search(args["command"]):
+        elif kind == "bash" and _bash_read_paths(args["command"]) is not None:
             events.append({"step": step, "index": index, "label": args["command"][:160], "text": text})
     return events
 

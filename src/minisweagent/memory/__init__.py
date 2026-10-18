@@ -1,13 +1,15 @@
 """Memory module for mini-swe-agent.
 
-This module provides simple memory functionality including:
-- History compression for long conversations
+This module provides memory functionality including:
+- History compression that keeps the task, the latest turn, and high-signal steps
+- Keyword and regex search over the current transcript and saved sessions
 - Session memory for cross-session persistence
 - Trajectory replay capabilities
 """
 
 from .history import HistoryManager
+from .search import MemorySearch
 from .session import SessionMemory
 from .replay import TrajectoryReplayer
 
-__all__ = ["HistoryManager", "SessionMemory", "TrajectoryReplayer"]
+__all__ = ["HistoryManager", "MemorySearch", "SessionMemory", "TrajectoryReplayer"]

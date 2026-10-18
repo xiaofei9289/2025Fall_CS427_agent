@@ -17,7 +17,7 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import register
+from . import ensure_within_workspace, register
 
 
 @dataclass
@@ -74,12 +74,9 @@ class SearchFileTool:
 
         # If running in Docker environment (SWEBench)
         if env is not None:
-            # Validate path is within /testbed for safety
-            if not path_arg.startswith("/testbed"):
-                return {
-                    "output": f"Path must be within /testbed directory, got: {path_arg}",
-                    "returncode": 1,
-                }
+            # Resolve the real path in the environment and reject anything outside the workspace
+            if rejected := ensure_within_workspace(env, path_arg):
+                return rejected
             return self._search_in_env(env, path_arg, pattern, context_lines, use_regex, case_sensitive)
 
         # Local filesystem search
@@ -107,14 +104,15 @@ class SearchFileTool:
         flags.append("-n")  # Show line numbers
         flags.append(f"-C {context_lines}")  # Context lines
 
-        # Construct safe grep command
+        # Preserve grep's real error codes: "no matches" (1) becomes a normal empty
+        # result, while genuine errors (2, e.g. missing files or bad patterns) must
+        # not be masked as success.
         flag_str = " ".join(flags)
-        cmd = f"grep {flag_str} -- {shlex.quote(pattern)} {shlex.quote(path)} || test $? = 1"
+        cmd = f"grep {flag_str} -- {shlex.quote(pattern)} {shlex.quote(path)}; status=$?; [ $status -le 1 ] || exit $status"
 
         result = env.execute(cmd)
 
-        # grep returns 1 if no matches found, which is not an error for us
-        if result["returncode"] in (0, 1):
+        if result["returncode"] == 0:
             if not result["output"].strip():
                 return {"output": f"No matches found for '{pattern}' in {path}", "returncode": 0}
             return {"output": self._format_grep_output(result["output"], pattern), "returncode": 0}

@@ -13,7 +13,7 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import register
+from . import register, workspace_root
 
 
 @dataclass
@@ -118,15 +118,17 @@ class ReplaceTool:
 
     def _execute_in_env(self, env, path_arg: str, old_text: str, new_text: str, replace_all: bool) -> dict:
         """Execute replace operation in Docker environment using Python."""
-        # Validate path is within /testbed
+        # Validate the resolved path is inside the environment workspace (e.g., /testbed),
+        # comparing path components so /testbed-other style prefixes do not pass.
         validate_cmd = f"realpath -- {shlex.quote(path_arg)}"
         validate_result = env.execute(validate_cmd)
         if validate_result["returncode"] != 0:
             return {"output": f"Invalid path: {path_arg}", "returncode": 2}
         normalized_path = validate_result["output"].strip()
-        if not normalized_path.startswith("/testbed"):
+        root = workspace_root(env)
+        if normalized_path != root and not normalized_path.startswith(root.rstrip("/") + "/"):
             return {
-                "output": f"Path must be within /testbed: {path_arg} (resolved to {normalized_path})",
+                "output": f"Path must be within {root}: {path_arg} (resolved to {normalized_path})",
                 "returncode": 2,
             }
 

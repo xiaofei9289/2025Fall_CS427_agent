@@ -1,16 +1,22 @@
 """Unit tests for search_file_content tool."""
 
+import os
 import re
+import subprocess
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from minisweagent.tools.search import SearchFileTool
+
 
 def test_search_tool_registered():
     """Test that search tool is properly registered."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     assert "search_file_content" in REGISTRY
     tool = REGISTRY["search_file_content"]
@@ -20,8 +26,8 @@ def test_search_tool_registered():
 
 def test_basic_literal_search(tmp_path):
     """Test basic literal text search."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     # Create test file
     test_file = tmp_path / "test.txt"
@@ -47,8 +53,8 @@ def test_basic_literal_search(tmp_path):
 
 def test_case_insensitive_search(tmp_path):
     """Test case-insensitive search."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text(
@@ -74,8 +80,8 @@ def test_case_insensitive_search(tmp_path):
 
 def test_case_sensitive_search_default(tmp_path):
     """Test that search is case-sensitive by default."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text(
@@ -100,8 +106,8 @@ def test_case_sensitive_search_default(tmp_path):
 
 def test_regex_search(tmp_path):
     """Test regex pattern matching."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text(
@@ -132,8 +138,8 @@ def test_regex_search(tmp_path):
 
 def test_invalid_regex(tmp_path):
     """Test that invalid regex returns error."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text("some content")
@@ -151,8 +157,8 @@ def test_invalid_regex(tmp_path):
 
 def test_context_lines(tmp_path):
     """Test configurable context lines."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text(
@@ -184,8 +190,8 @@ def test_context_lines(tmp_path):
 
 def test_no_context_lines(tmp_path):
     """Test search with zero context lines."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text(
@@ -209,8 +215,8 @@ def test_no_context_lines(tmp_path):
 
 def test_no_matches_found(tmp_path):
     """Test when pattern is not found in file."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text("Some content without the pattern")
@@ -224,8 +230,8 @@ def test_no_matches_found(tmp_path):
 
 def test_file_not_found():
     """Test error when file doesn't exist."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     search = REGISTRY["search_file_content"]
     result = search({"path": "/nonexistent/file.txt", "pattern": "test"})
@@ -236,8 +242,8 @@ def test_file_not_found():
 
 def test_missing_path():
     """Test error when path parameter is missing."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     search = REGISTRY["search_file_content"]
     result = search({"pattern": "test"})
@@ -248,8 +254,8 @@ def test_missing_path():
 
 def test_missing_pattern(tmp_path):
     """Test error when pattern parameter is missing."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text("content")
@@ -263,8 +269,8 @@ def test_missing_pattern(tmp_path):
 
 def test_invalid_context_lines(tmp_path):
     """Test error with invalid context_lines parameter."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text("content")
@@ -282,8 +288,8 @@ def test_invalid_context_lines(tmp_path):
 
 def test_multiple_matches_grouping(tmp_path):
     """Test that nearby matches are grouped together."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     lines = []
@@ -310,16 +316,18 @@ def test_multiple_matches_grouping(tmp_path):
 
 
 def test_docker_mode_path_validation():
-    """Test that Docker mode validates paths are within /testbed."""
-    from minisweagent.tools import REGISTRY
+    """Test that Docker mode validates paths are within the workspace root."""
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
-    # Mock environment
+    # Mock environment resolving paths inside itself
     mock_env = MagicMock()
+    mock_env.config.cwd = "/testbed"
 
     search = REGISTRY["search_file_content"]
 
-    # Test path outside /testbed should fail
+    # A path resolving outside /testbed must be rejected before grep runs
+    mock_env.execute.return_value = {"output": "/etc/passwd", "returncode": 0}  # realpath
     result = search(
         {"path": "/etc/passwd", "pattern": "root"},
         env=mock_env,
@@ -327,27 +335,35 @@ def test_docker_mode_path_validation():
 
     assert result["returncode"] == 1
     assert "/testbed" in result["output"]
+    assert mock_env.execute.call_count == 1  # Only the resolution ran
 
-    # Test path within /testbed should proceed (will call env.execute)
-    mock_env.execute.return_value = {"output": "No matches", "returncode": 1}
+    # A path resolving inside /testbed proceeds to grep
+    mock_env.execute.side_effect = [
+        {"output": "/testbed/file.txt", "returncode": 0},  # realpath
+        {"output": "No matches", "returncode": 0},  # grep
+    ]
     result = search(
         {"path": "/testbed/file.txt", "pattern": "test"},
         env=mock_env,
     )
 
-    assert mock_env.execute.called
+    assert mock_env.execute.call_count == 3
 
 
 def test_docker_mode_grep_command():
     """Test that Docker mode uses correct grep command."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     mock_env = MagicMock()
-    mock_env.execute.return_value = {
-        "output": "5:some match here",
-        "returncode": 0,
-    }
+    mock_env.config.cwd = "/testbed"
+    mock_env.execute.side_effect = [
+        {"output": "/testbed/test.txt", "returncode": 0},  # realpath
+        {
+            "output": "5:some match here",
+            "returncode": 0,
+        },  # grep
+    ]
 
     search = REGISTRY["search_file_content"]
     result = search(
@@ -366,15 +382,21 @@ def test_docker_mode_grep_command():
     assert "-n" in call_args  # Line numbers
     assert "-C 2" in call_args  # Context lines
     assert "test" in call_args
+    # Real grep errors (>= 2) must stay visible instead of being masked as success
+    assert result["returncode"] == 0
 
 
 def test_docker_mode_regex_grep():
     """Test that Docker mode uses -E flag for regex."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     mock_env = MagicMock()
-    mock_env.execute.return_value = {"output": "", "returncode": 1}
+    mock_env.config.cwd = "/testbed"
+    mock_env.execute.side_effect = [
+        {"output": "/testbed/test.txt", "returncode": 0},  # realpath
+        {"output": "", "returncode": 0},  # grep
+    ]
 
     search = REGISTRY["search_file_content"]
     search(
@@ -392,8 +414,8 @@ def test_docker_mode_regex_grep():
 
 def test_empty_file(tmp_path):
     """Test search on empty file."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "empty.txt"
     test_file.write_text("")
@@ -407,8 +429,8 @@ def test_empty_file(tmp_path):
 
 def test_special_characters_literal_search(tmp_path):
     """Test that special regex chars are escaped in literal search."""
-    from minisweagent.tools import REGISTRY
     import minisweagent.tools.search  # noqa: F401
+    from minisweagent.tools import REGISTRY
 
     test_file = tmp_path / "test.txt"
     test_file.write_text(
@@ -440,3 +462,32 @@ def test_special_characters_literal_search(tmp_path):
     assert result["returncode"] == 0
     assert "1 match(es)" in result["output"]
     assert "array[0]" in result["output"]
+
+
+class RootShellEnv:
+    """A minimal environment running commands through the real shell, boundary disabled."""
+
+    config = SimpleNamespace(cwd="/")
+
+    def execute(self, command):
+        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        return {"output": result.stdout + result.stderr, "returncode": result.returncode}
+
+
+def test_search_preserves_grep_error():
+    """grep's real error (exit 2, e.g. missing file) must not be masked as success."""
+    result = SearchFileTool()({"path": "/testbed/missing.py", "pattern": "needle"}, RootShellEnv())
+    assert result["returncode"] == 2
+    assert "No matches found" not in result["output"]
+
+
+def test_search_no_match_is_still_success():
+    """A normal no-match on an existing file stays a successful empty result."""
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as handle:
+        handle.write("nothing relevant here\n")
+        path = handle.name
+    try:
+        result = SearchFileTool()({"path": path, "pattern": "needle"}, RootShellEnv())
+    finally:
+        os.unlink(path)
+    assert result == {"output": f"No matches found for 'needle' in {path}", "returncode": 0}

@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from minisweagent.memory.session import SessionMemory
 
 
@@ -74,6 +75,35 @@ class TestSessionMemory:
 
         result = memory.load_session()
         assert result is None
+
+    def test_valid_json_wrong_shape_falls_back(self, tmp_path):
+        """Legally parseable but structurally wrong sessions degrade to empty memory."""
+        memory = SessionMemory(tmp_path, "shape")
+        memory.session_file.write_text("[1]")
+        assert memory.load_session() is None
+        assert memory.get_messages() == []
+
+        memory.session_file.write_text('{"messages": [1]}')
+        assert memory.load_session() is None
+        assert memory.get_messages() == []
+
+    def test_wrong_shape_sessions_are_skipped_when_listing_and_searching(self, tmp_path):
+        """list_sessions and search skip structurally wrong files instead of crashing."""
+        memory = SessionMemory(tmp_path, "mixed")
+        memory.session_file.write_text("[1]")
+        good = SessionMemory(tmp_path, "good")
+        good.save_session([{"role": "user", "content": "needle"}])
+        assert [s["session_id"] for s in memory.list_sessions()] == ["good"]
+        assert [hit["session_id"] for hit in memory.search("needle")] == ["good"]
+
+    def test_save_session_is_atomic(self, tmp_path):
+        """A failed save leaves any earlier session file intact."""
+        memory = SessionMemory(tmp_path, "atomic")
+        memory.save_session([{"role": "user", "content": "first"}])
+        (tmp_path / "atomic.json.tmp").write_text("would-be-corrupt")
+        memory.save_session([{"role": "user", "content": "second"}])
+        assert memory.get_messages() == [{"role": "user", "content": "second"}]
+        assert not (tmp_path / "atomic.json.tmp").exists()
 
     def test_list_sessions(self, tmp_path):
         """Test listing available sessions."""

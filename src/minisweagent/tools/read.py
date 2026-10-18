@@ -17,12 +17,11 @@ The tool follows the Tool protocol and returns {"output": str, "returncode": int
 from __future__ import annotations
 
 import json
-import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import register
+from . import ensure_within_workspace, register
 
 
 @dataclass
@@ -110,6 +109,9 @@ class RefinedReadFile:
 
     def _execute_in_env(self, env, path_arg: str, selector: dict, strip_comments: bool, max_chars: int) -> dict:
         """Execute read operation inside the environment (Docker/sandbox)."""
+        # Reads must stay inside the environment workspace (e.g., /testbed)
+        if rejected := ensure_within_workspace(env, path_arg):
+            return rejected
         # Build bash command to read file with line selection
         cmd = self._build_bash_command(path_arg, selector)
 
@@ -256,7 +258,6 @@ class RefinedReadFile:
         # Normalize line endings
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         lines = text.splitlines(keepends=True)
-        total_lines = len(lines)
 
         # Apply selector
         try:

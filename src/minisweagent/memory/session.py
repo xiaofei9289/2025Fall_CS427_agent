@@ -9,6 +9,19 @@ from typing import Any
 from minisweagent.memory.search import MemorySearch
 
 
+def _parse_session(data: Any) -> dict[str, Any] | None:
+    """Return the session dict when its JSON shape is valid, else None.
+
+    A legally parseable but structurally wrong file (e.g. ``[1]``) must fall
+    back to an empty memory instead of crashing the agent.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("messages"), list):
+        return None
+    if not all(isinstance(m, dict) and "role" in m and "content" in m for m in data["messages"]):
+        return None
+    return data
+
+
 class SessionMemory:
     """Manages session memory storage and retrieval."""
 
@@ -25,14 +38,16 @@ class SessionMemory:
         self.session_file = self.memory_dir / f"{self.session_id}.json"
 
     def save_session(self, messages: list[dict[str, Any]], metadata: dict | None = None) -> None:
-        """Save session data to file."""
+        """Save session data to file atomically: a failed save leaves the old file intact."""
         session_data = {
             "session_id": self.session_id,
             "messages": messages,
             "metadata": metadata or {},
             "saved_at": self._get_timestamp(),
         }
-        self.session_file.write_text(json.dumps(session_data, indent=2))
+        tmp_file = self.session_file.with_name(self.session_file.name + ".tmp")
+        tmp_file.write_text(json.dumps(session_data, indent=2))
+        tmp_file.replace(self.session_file)
 
     def load_session(self) -> dict[str, Any] | None:
         """Load session data, or None if the file is missing or unreadable."""
@@ -40,7 +55,7 @@ class SessionMemory:
             return None
         # Corrupt or unreadable session files fail gracefully to an empty memory.
         try:
-            return json.loads(self.session_file.read_text())
+            return _parse_session(json.loads(self.session_file.read_text()))
         except (json.JSONDecodeError, OSError):
             return None
 
@@ -53,8 +68,10 @@ class SessionMemory:
         sessions = []
         for session_file in self.memory_dir.glob("*.json"):
             try:
-                data = json.loads(session_file.read_text())
+                data = _parse_session(json.loads(session_file.read_text()))
             except (json.JSONDecodeError, OSError):
+                continue
+            if data is None:
                 continue
             sessions.append({
                 "session_id": data.get("session_id"),
@@ -82,8 +99,10 @@ class SessionMemory:
         hits: list[dict[str, Any]] = []
         for session_file in self.memory_dir.glob("*.json"):
             try:
-                data = json.loads(session_file.read_text())
+                data = _parse_session(json.loads(session_file.read_text()))
             except (json.JSONDecodeError, OSError):
+                continue
+            if data is None:
                 continue
             session_id = data.get("session_id", session_file.stem)
             hits.extend(
