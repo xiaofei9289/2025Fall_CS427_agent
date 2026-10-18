@@ -48,7 +48,7 @@ def main() -> None:
     if args.phase == "generation":
         execute("generation", [
             sys.executable, "-m", "minisweagent.run.extra.swebench", "--subset", "verified", "--split", "test",
-            "--instance-ids", str(study / "tasks.json"), "--config", str(study / "deepseek_chat.yaml"),
+            "--instance-ids", str(study / "tasks.json"), "--config", str(study / "baseline.yaml"),
             "--output", str(study / "baseline"), "--workers", str(args.workers),
         ], root)
         predictions = json.loads((study / "baseline" / "preds.json").read_text())
