@@ -49,14 +49,11 @@ python experiments/memory_fix_20261018/desktop.py all
 TokenFY 配置文件。密钥只作为容器环境变量传入，不写入实验配置或命令行。
 生成和评分分别保存日志，预测、轨迹、源码快照和官方结果位于独立的 `off/`、`on/`。
 
-当前状态：**生成和官方评分均未启动**。已同步修复源码和运行脚本，并验证两组配置仅
-`enable_memory` 不同。用户完成 Docker 重装/迁移后，已确认台式机 Linux 引擎恢复，
-但镜像和缓存为空。正在用 `Dockerfile.validation` 重建评测镜像；Docker Hub 基础镜像
-下载失败后，改用项目已采用的 Docker 官方 ECR Public 分发，构建继续进行。
+当前状态：**镜像与数据集就绪（2026-10-18 上午经 SSH 核实），生成和官方评分未启动**。验证镜像
+`cs427-validation:local` 已建成；5 个任务镜像经 `docker.m.daocloud.io`/`docker.1ms.run` 加速站
+拉取并已打回 `swebench/*` 标签，冒烟启动通过；SWE-bench_Verified 数据集（500 行）已缓存于
+`cs427-hf-cache` 卷，容器内离线加载验证通过。台式机对 Hugging Face 直连仍失败，
+`desktop.py` 已改为以 `HF_HUB_OFFLINE=1` 启动容器，数据集一律走本地缓存。无网络阻塞。
 
-目前网络阻塞：台式机访问 Docker Hub 和 Hugging Face 的 HTTPS 失败，任务镜像及数据集
-尚未重新下载，已请求恢复该网络。ECR Public 和 TokenFY 服务可访问。模型凭据已由用户
-提供，仅在后续生成进程中临时使用，不写入配置、仓库或实验日志。
-
-前置条件恢复后，完成运行会生成 `comparison.json` 和 `comparison.md`；空补丁计入未解决，
+运行完成后会生成 `comparison.json` 和 `comparison.md`；空补丁计入未解决，
 评分基础设施错误单独列出。单次五题结果不能外推为全部课程任务的稳定收益。

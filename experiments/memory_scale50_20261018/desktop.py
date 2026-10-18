@@ -63,7 +63,8 @@ def main() -> None:
     for phase in phases:
         command = ["docker", "run", "--rm", "--entrypoint=", *mounts, "-w", "/workspace",
                    "-e", "PYTHONPATH=/workspace/src:/workspace/SWE-bench", "-e", "MSWEA_SILENT_STARTUP=1",
-                   "-e", "MSWEA_GLOBAL_CONFIG_DIR=/tmp/cs427-config", "-e", "HF_HOME=/hf-cache"]
+                   "-e", "MSWEA_GLOBAL_CONFIG_DIR=/tmp/cs427-config", "-e", "HF_HOME=/hf-cache",
+                   "-e", "HF_HUB_OFFLINE=1"]
         if phase == "generation":
             command += ["-e", "OPENAI_API_KEY"]
         command += ["cs427-validation:local", "python", f"experiments/{study.name}/run.py", phase]
