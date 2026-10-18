@@ -77,6 +77,30 @@ def test_format_error_handling():
     )
 
 
+def test_format_error_reports_actual_action_count():
+    """Test the format error feedback contains the real number of parsed actions."""
+    agent = DefaultAgent(
+        model=DeterministicModel(
+            outputs=[
+                "No blocks at all",
+                "Multiple blocks\n```bash\necho 'first'\n```\n```bash\necho 'second'\n```",
+                "Recover\n```bash\necho 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'done'\n```",
+            ]
+        ),
+        env=LocalEnvironment(),
+        format_error_template="Found {{actions|length}} actions; provide exactly one.",
+    )
+
+    agent.run("Test format error counts")
+    feedback = [
+        msg.get("content", "")
+        for msg in agent.messages
+        if "actions; provide exactly one" in msg.get("content", "")
+    ]
+    assert "Found 0 actions" in feedback[0]
+    assert "Found 2 actions" in feedback[1]
+
+
 def test_timeout_handling():
     """Test agent handles command timeouts properly."""
     agent = DefaultAgent(

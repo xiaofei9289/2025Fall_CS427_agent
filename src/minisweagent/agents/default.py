@@ -290,7 +290,9 @@ class DefaultAgent:
         bash_blocks = re.findall(r"```bash\n(.*?)\n```", content, re.DOTALL)
 
         if len(tool_blocks) + len(bash_blocks) != 1:
-            raise FormatError(self.render_template(self.config.format_error_template, actions=[]))
+            raise FormatError(
+                self.render_template(self.config.format_error_template, actions=tool_blocks + bash_blocks)
+            )
 
         if tool_blocks:
             try:
