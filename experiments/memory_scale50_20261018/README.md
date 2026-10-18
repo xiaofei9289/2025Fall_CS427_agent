@@ -14,6 +14,8 @@
 2. 运行前必须把最新修复源码（2026-10-18 的 `default.py` 去重与记忆优雅降级、
    `session.py` 清理）同步到 `desktop_validation/memory-fix-20261018`；`desktop.py`
    会检查快照中任务文本只出现一次，旧快照会被拒绝。两组共用同一快照。
+   同步用 `powershell -ExecutionPolicy Bypass -File experiments\memory_fix_20261018\refresh_snapshot.ps1`
+   （在 `git pull` 后执行，自动镜像并校验快照新鲜度）。
 3. 50 题对照**只跑一次**：不得根据其结果回头调整配置再跑。调参只在五题集上进行；
    最终声明以单次 50 题结果为准。前 5 题与五题 pilot 重叠（迭代用过），报告时
    `comparison.md` 会同时给出全 50 题与剔除前 5 题后的结果。

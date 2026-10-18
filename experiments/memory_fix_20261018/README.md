@@ -29,7 +29,17 @@ python -m minisweagent.run.extra.memory_replay \
 `django__django-14855` 等）恢复后应做同样检查。
 
 
-台式机上运行：
+台式机上运行前先同步本轮改动（40 条消息预算、`memory_replay` 工具、严格高于门槛）：
+
+```powershell
+git pull
+powershell -ExecutionPolicy Bypass -File experiments\memory_fix_20261018\refresh_snapshot.ps1
+```
+
+刷新脚本把仓库 `src/`、`tests/` 镜像进 `desktop_validation\memory-fix-20261018` 快照，并校验
+`default.py` 任务文本唯一、`memory_replay.py` 存在、`on.yaml` 已是 40 条预算；旧快照会被拒绝。
+
+然后启动：
 
 ```powershell
 python experiments/memory_fix_20261018/desktop.py all
