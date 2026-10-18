@@ -21,6 +21,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=["generation", "grading"])
     parser.add_argument("--arms", nargs="*", default=list(ARMS))
+    parser.add_argument("--tag", default="", help="Suffix appended to arm directories, logs, and run ids (e.g. _r2), keeping earlier runs intact")
     args = parser.parse_args()
     if platform.system() != "Linux":
         raise SystemExit("Run inside Linux on the desktop; execution on the editing Mac is disabled.")
@@ -49,14 +50,15 @@ def main() -> None:
         print(f"Finished {name}", flush=True)
 
     for arm in args.arms:
+        directory = arm + args.tag
         if args.phase == "generation":
-            execute(arm, arm, [
+            execute(arm, directory, [
                 sys.executable, "-m", "minisweagent.run.extra.swebench", "--subset", "verified", "--split", "test",
                 "--instance-ids", str(study / "tasks.json"), "--config", str(study / f"{arm}.yaml"),
-                "--output", str(study / arm), "--workers", "1",
+                "--output", str(study / directory), "--workers", "1",
             ], root)
-            predictions = json.loads((study / arm / "preds.json").read_text())
-            trajectories = list((study / arm).rglob("*.traj.json"))
+            predictions = json.loads((study / directory / "preds.json").read_text())
+            trajectories = list((study / directory).rglob("*.traj.json"))
             if set(predictions) != set(task_ids) or len(trajectories) != len(task_ids):
                 raise RuntimeError(f"Incomplete generation in {arm}")
             for trajectory in trajectories:
@@ -67,19 +69,19 @@ def main() -> None:
             # The exporter records exception messages as model_patch; blank those
             # (they are never valid diffs) before official grading, keeping the
             # untouched originals as preds.json.
-            predictions = json.loads((study / arm / "preds.json").read_text())
+            predictions = json.loads((study / directory / "preds.json").read_text())
             sanitized = {
                 task: row | {"model_patch": row["model_patch"] if row["model_patch"].startswith("diff --git ") else ""}
                 for task, row in predictions.items()
             }
-            (study / arm / "preds.empty_on_errors.json").write_text(json.dumps(sanitized, indent=2))
-            output = study / arm / "evaluation"
+            (study / directory / "preds.empty_on_errors.json").write_text(json.dumps(sanitized, indent=2))
+            output = study / directory / "evaluation"
             output.mkdir(parents=True, exist_ok=True)
             parameters = {
                 "dataset_name": "princeton-nlp/SWE-bench_Verified", "split": "test", "instance_ids": task_ids,
-                "predictions_path": str(study / arm / "preds.empty_on_errors.json"), "max_workers": 1,
+                "predictions_path": str(study / directory / "preds.empty_on_errors.json"), "max_workers": 1,
                 "force_rebuild": False, "cache_level": "instance", "clean": False, "open_file_limit": 4096,
-                "run_id": f"pilot-tokenfy-20261018-{arm}",
+                "run_id": f"pilot-tokenfy-20261018{args.tag}-{arm}",
                 "timeout": 300, "namespace": "swebench",
                 "rewrite_reports": False, "modal": False,
             }
@@ -89,9 +91,9 @@ def main() -> None:
                 f"report = main(**{parameters!r})\nPath(report).replace('grading_summary.json')\n"
             )
             if not (output / "grading_summary.json").exists():
-                execute(arm, f"{arm}_grading", [sys.executable, "-c", script], output)
+                execute(arm, f"{directory}_grading", [sys.executable, "-c", script], output)
             else:
-                print(f"Preserving existing {arm} grading report", flush=True)
+                print(f"Preserving existing {directory} grading report", flush=True)
             summary = json.loads((output / "grading_summary.json").read_text())
             if summary["completed_instances"] + summary.get("empty_patch_instances", 0) != len(task_ids) or summary.get("error_instances"):
                 incomplete.append(arm)
