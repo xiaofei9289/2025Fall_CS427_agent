@@ -18,6 +18,35 @@ from minisweagent.tools import REGISTRY as TOOL_REGISTRY
 from minisweagent.tools import list_tool_specs
 from minisweagent.utils.log import logger
 
+_DSML_INVOKE_RE = re.compile(
+    r"<｜｜DSML｜｜\s*invoke\s+name=\"([^\"]+)\"\s*>(.*?)</｜｜DSML｜｜\s*invoke>",
+    re.DOTALL,
+)
+_DSML_PARAM_RE = re.compile(
+    r"<｜｜DSML｜｜\s*parameter\s+name=\"([^\"]+)\"(?:\s+string=\"([^\"]*)\")?\s*>(.*?)</｜｜DSML｜｜\s*parameter>",
+    re.DOTALL,
+)
+
+
+def _parse_dsml_action(content: str) -> dict | None:
+    """Parse the model's native DSML tool-call syntax as a fallback.
+
+    Some providers emit ``<｜｜DSML｜｜ invoke name="...">`` instead of the
+    canonical triple-backtick JSON block.  Treating that as a format error
+    makes a tool-using arm silently unable to call its tool.
+    """
+    match = _DSML_INVOKE_RE.search(content)
+    if match is None:
+        return None
+    name = match.group(1)
+    args = {
+        item.group(1): item.group(3).strip()
+        for item in _DSML_PARAM_RE.finditer(match.group(2))
+    }
+    if name == "bash":
+        return {"kind": "bash", "action": args.get("command", "").strip()}
+    return {"kind": "tool", "tool_name": name, "tool_args": args}
+
 
 @dataclass
 class AgentConfig:
@@ -361,6 +390,11 @@ class DefaultAgent:
         content = response["content"]
         tool_blocks = re.findall(r"```tool\n(.*?)\n```", content, re.DOTALL)
         bash_blocks = re.findall(r"```bash\n(.*?)\n```", content, re.DOTALL)
+
+        if not tool_blocks and not bash_blocks:
+            dsml_action = _parse_dsml_action(content)
+            if dsml_action is not None:
+                return {**dsml_action, **response}
 
         if len(tool_blocks) + len(bash_blocks) != 1:
             raise FormatError(

@@ -145,6 +145,22 @@ def test_search_gate_blocks_submission_until_a_search(tmp_path):
     assert any("Before editing or submitting" in str(m.get("content", "")) for m in agent.messages)
 
 
+def test_dsml_memory_search_is_parsed_as_a_tool_call(tmp_path):
+    dsml = (
+        "<｜｜DSML｜｜ calls>\n"
+        '<｜｜DSML｜｜ invoke name="memory_search">\n'
+        '<｜｜DSML｜｜ parameter name="query" string="true">OBSERVATION</｜｜DSML｜｜ parameter>\n'
+        "</｜｜DSML｜｜ invoke>\n"
+        "</｜｜DSML｜｜ calls>"
+    )
+    submit = "```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"
+    model = FakeModel([dsml, submit])
+    agent = MemoryAgent(model, FakeEnv(), **config(tmp_path, "summary_search").__dict__)
+    status, message = agent.run("fix the parser")
+    assert status == "Submitted", message
+    assert agent.search_calls == 1
+
+
 def test_oversized_model_response_does_not_terminate(tmp_path):
     huge = "<｜｜DSML｜｜ calls>" + "A" * 20000
     model = FakeModel([huge, "```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"])
