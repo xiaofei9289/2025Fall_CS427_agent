@@ -15,10 +15,17 @@ This document summarizes the current memory integration in mini-swe-agent and pr
 
 ### History Manager
 - `HistoryManager` (see `src/minisweagent/memory/history.py`):
-  - Provides conversation compression capabilities and keeps recent messages while preserving system messages to manage context length
-  - Key methods:
-    - `compress_messages()`: Reduces message history while keeping important context
-    - `get_summary_stats()`: Provides statistics about message history
+  - `compress_messages()` keeps the system prompt and the most recent turns
+  - `compress_salient()` keeps the system prompt, original task, and a continuous suffix of complete action/observation turns. A bounded `[memory]` summary of omitted execution evidence shares the message budget. Limits too small for the task and latest complete turn are rejected
+  - Short histories are sent unchanged. Summaries identify source steps, record only successful read tools as reads, and replace earlier failures when the same operation succeeds. Successful edits mark earlier reads as potentially stale. Paths mentioned only in model prose are not evidence
+  - The agent uses `prompt_messages()` on each model call when `--memory` is enabled. The full transcript stays in `agent.messages` and remains searchable
+  - `get_summary_stats()` reports message counts and whether the history is over the limit
+
+### Memory Search
+- `MemorySearch` (see `src/minisweagent/memory/search.py`) searches a transcript by keyword or regular expression
+- Keyword queries are case-insensitive and require every term to match. Results include the message index, role, score, and a short snippet
+- `SessionMemory.search()` runs the same search across saved session files
+- The `memory_search` tool exposes this to the agent. `scope=current` reads the live transcript. `scope=sessions` reads saved sessions. The agent refreshes that context before every model call
 
 ### Session Memory
 - `SessionMemory` (see `src/minisweagent/memory/session.py`):
@@ -74,9 +81,16 @@ This document summarizes the current memory integration in mini-swe-agent and pr
   replayer.create_replay_script(Path("replay.sh"))
   ```
 
+- Search the live transcript or saved sessions from a tool call:
+  ```tool
+  {"name": "memory_search", "args": {"query": "traceback src/app.py", "scope": "current"}}
+  ```
+
 ## Extending the Memory Component
 
-We have implemented basic memory functionality including conversation history compression, cross-session persistence, and trajectory replay for debugging. These provide a foundation for more advanced memory capabilities.
+The memory layer keeps a full transcript, sends the model a shorter view of complete recent turns and older execution evidence, and can search the full transcript. `compress_salient()` and `memory_search` cover the two extensions below: finding earlier evidence and compressing history while preserving the connection between actions and their observations.
+
+The shared LiteLLM adapter labels empty, truncated, and filtered responses. A `content_filter` finish reason counts as filtered only when the content is empty or explicitly refused; some proxies flag complete, usable responses as `content_filter`, and those are labeled truncated. The agent executes none of these, stops immediately on a genuinely filtered response, and stops after `max_consecutive_model_errors` (default 3) consecutive empty/truncated responses. Calls and costs still count, and the SWE-bench exporter attempts to recover existing source edits on this early exit. Both experiment arms must use the same response handling. These repairs require new controlled evaluation; they do not change the recorded five-task memory result of 4/5 without memory versus 2/5 with memory.
 
 Your task is to extend the existing memory framework to enhance the agent's problem-solving abilities. If you have better ideas, you are also welcome to redesign the memory framework entirely, though this may require more time and effort.
 

@@ -76,3 +76,39 @@ def test_model_registry_not_provided():
 
         # Verify register_model was not called
         mock_register.assert_not_called()
+
+
+@pytest.mark.parametrize(("content", "finish_reason", "status"), [
+    (None, "stop", "empty"),
+    ("  ", "stop", "empty"),
+    (None, "content_filter", "filtered"),
+    ("```bash\necho hello\n```", "content_filter", "truncated"),
+    ("```bash\necho hello\n```", "length", "truncated"),
+    ("```bash\necho hello\n```", "stop", "ok"),
+])
+def test_response_status_preserves_accounting(content, finish_reason, status, monkeypatch, reset_global_stats):
+    model = LitellmModel(model_name="gpt-4o")
+    response = litellm.ModelResponse(choices=[{
+        "index": 0, "finish_reason": finish_reason,
+        "message": {"role": "assistant", "content": content, "reasoning_content": "internal reasoning"},
+    }])
+    monkeypatch.setattr(model, "_query", Mock(return_value=response))
+    monkeypatch.setattr(litellm.cost_calculator, "completion_cost", Mock(return_value=0.1))
+    result = model.query([{"role": "user", "content": "task"}])
+    assert result["content"] == (content or "")
+    assert result["extra"]["response_status"] == status
+    assert result["extra"]["response"]["choices"][0]["finish_reason"] == finish_reason
+    assert model.n_calls == 1
+    assert model.cost == pytest.approx(0.1)
+
+
+def test_refused_content_filter_is_filtered(monkeypatch, reset_global_stats):
+    """An explicit provider refusal must still stop the agent immediately."""
+    model = LitellmModel(model_name="gpt-4o")
+    response = litellm.ModelResponse(choices=[{
+        "index": 0, "finish_reason": "content_filter",
+        "message": {"role": "assistant", "content": "blocked", "refusal": "policy violation"},
+    }])
+    monkeypatch.setattr(model, "_query", Mock(return_value=response))
+    monkeypatch.setattr(litellm.cost_calculator, "completion_cost", Mock(return_value=0.1))
+    assert model.query([{"role": "user", "content": "task"}])["extra"]["response_status"] == "filtered"

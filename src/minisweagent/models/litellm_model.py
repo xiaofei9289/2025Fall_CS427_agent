@@ -87,9 +87,21 @@ class LitellmModel:
         if not response.choices:
             raise ValueError("API response contains no choices. This may indicate an API issue or invalid request.")
 
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        if choice.finish_reason == "content_filter":
+            # Some proxies flag complete, usable responses as content_filter; only an
+            # empty or explicitly refused response counts as genuinely filtered.
+            refused = bool(getattr(choice.message, "refusal", None))
+            status = "filtered" if not content.strip() or refused else "truncated"
+        elif choice.finish_reason == "length":
+            status = "truncated"
+        else:
+            status = "ok" if content.strip() else "empty"
         return {
-            "content": response.choices[0].message.content or "",  # type: ignore
+            "content": content,
             "extra": {
+                "response_status": status,
                 "response": response.model_dump(),
             },
         }
