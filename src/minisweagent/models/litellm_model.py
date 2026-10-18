@@ -90,10 +90,11 @@ class LitellmModel:
         choice = response.choices[0]
         content = choice.message.content or ""
         if choice.finish_reason == "content_filter":
-            # Some proxies flag complete, usable responses as content_filter; only an
-            # empty or explicitly refused response counts as genuinely filtered.
-            refused = bool(getattr(choice.message, "refusal", None))
-            status = "filtered" if not content.strip() or refused else "truncated"
+            # Channels intermittently report content_filter on requests that succeed
+            # unchanged on retry (verified against TokenFY: the same payload returned
+            # a complete action once and content_filter+empty another time); only an
+            # explicit refusal is treated as a genuine filter that stops the agent.
+            status = "filtered" if getattr(choice.message, "refusal", None) else "truncated"
         elif choice.finish_reason == "length":
             status = "truncated"
         else:

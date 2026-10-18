@@ -81,7 +81,7 @@ def test_model_registry_not_provided():
 @pytest.mark.parametrize(("content", "finish_reason", "status"), [
     (None, "stop", "empty"),
     ("  ", "stop", "empty"),
-    (None, "content_filter", "filtered"),
+    (None, "content_filter", "truncated"),
     ("```bash\necho hello\n```", "content_filter", "truncated"),
     ("```bash\necho hello\n```", "length", "truncated"),
     ("```bash\necho hello\n```", "stop", "ok"),
