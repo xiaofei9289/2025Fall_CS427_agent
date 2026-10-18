@@ -22,12 +22,13 @@ def main() -> None:
     parser.add_argument("phase", choices=["generation", "grading"])
     parser.add_argument("--arms", nargs="*", default=list(ARMS))
     parser.add_argument("--tag", default="", help="Suffix appended to arm directories, logs, and run ids (e.g. _r2), keeping earlier runs intact")
+    parser.add_argument("--tasks", default="", help="Optional JSON file with an instance-id subset; defaults to tasks.json")
     args = parser.parse_args()
     if platform.system() != "Linux":
         raise SystemExit("Run inside Linux on the desktop; execution on the editing Mac is disabled.")
     study = Path(__file__).resolve().parent
     root = study.parents[1]
-    task_ids = json.loads((study / "tasks.json").read_text())
+    task_ids = json.loads(Path(args.tasks or study / "tasks.json").read_text())
     incomplete = []
 
     def execute(arm: str, name: str, command: list[str], cwd: Path) -> None:
@@ -35,7 +36,7 @@ def main() -> None:
             "PYTHONPATH": os.pathsep.join((str(root / "src"), str(root / "SWE-bench"))),
             "MSWEA_MODEL_API_KEY": os.environ[f"TOKENFY_KEY_{arm.upper()}"],
             "LITELLM_MODEL_REGISTRY_PATH": str(study / "tokenfy_model_registry.json"),
-            "MSWEA_GLOBAL_COST_LIMIT": "10", "MSWEA_SILENT_STARTUP": "1",
+            "MSWEA_GLOBAL_COST_LIMIT": os.environ.get("MSWEA_GLOBAL_COST_LIMIT", "10"), "MSWEA_SILENT_STARTUP": "1",
         }
         started = time.monotonic()
         print(f"Starting {name}", flush=True)
