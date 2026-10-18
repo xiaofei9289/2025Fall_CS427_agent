@@ -112,6 +112,9 @@ python -m minisweagent.run.extra.localization_eval \
 `content_filter` 且有可用内容时按截断处理（a6b2c76），重跑位于 `experiments/memory_fix2_20261018`。
 该密钥随后被改为仅可访问 `gemini-3.8-flash`（403 实测确认），fix2 改用该模型并把
 `model_prices.json` 沿用 2.5 单价作近似——成本数字仅为量级参考，两组同样受影响。
+fix2 的 off 组首轮 403 全部 `APIError` 终止，改配置后又被 `write_manifest`
+"配置已变"防护拒绝同目录重跑，两轮目录均原样保留；当前有效运行位于
+`experiments/memory_fix3_20261018`（模型 3.8、消息预算 40）。
 消息预算已从 12 条提高到 40 条（12 条在两轮对照中开启组 0/5、1/5，弃用），生成前先用
 `minisweagent.run.extra.memory_replay` 对失败轨迹离线重放，确认刚读的重要代码仍在发送内容中
 （11333 轨迹重放：25 次调用中 5 次压缩，已读代码 97.3% 全文可见，最近一次读取始终完整）。
