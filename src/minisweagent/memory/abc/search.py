@@ -101,8 +101,10 @@ class MemorySearchTool:
     name: str = "memory_search"
     description: str = (
         "Search this run's earlier transcript for a keyword or regular expression. "
-        "Use mode=full to read matching messages, or index=N to reopen one message by "
-        "the number a result showed. Only messages already produced in this run are visible."
+        "Call this whenever a file path, error, or earlier decision you need is no longer "
+        "in view; do not guess or redo work. Use mode=full to read matching messages, or "
+        "index=N to reopen one message by the number a result showed. Only messages "
+        "already produced in this run are visible."
     )
     parameters: dict = field(
         default_factory=lambda: {
