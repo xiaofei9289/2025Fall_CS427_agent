@@ -63,6 +63,13 @@ class AgentConfig:
     memory_session_id: str = ""
     memory_load_session: bool = False
     enabled_tools: list[str] | None = None
+    # Retrieval policy: "gate" keeps the legacy mandatory first search,
+    # "brief" injects a deterministic repository brief and leaves tool choice
+    # to the model, and "off" does neither.
+    retrieval_policy: str = "gate"
+    repo_brief: bool = False
+    repo_brief_max_chars: int = 3000
+    repo_brief_max_files: int = 6
 
 
 class NonTerminatingException(Exception):
@@ -107,8 +114,19 @@ class DefaultAgent:
         if names is not None and (unknown := set(names) - TOOL_REGISTRY.keys()):
             raise ValueError(f"Unknown enabled tools: {sorted(unknown)}")
         self.tools = TOOL_REGISTRY if names is None else {name: TOOL_REGISTRY[name] for name in names}
-        self.retrieval_gate = {"code_search", "repo_map"} & set(names or [])
+        if self.config.retrieval_policy not in {"gate", "brief", "off"}:
+            raise ValueError("retrieval_policy must be one of: gate, brief, off")
+        self.retrieval_tools = {"code_search", "repo_map", "code_context"}
+        enabled_names = set(names) if names is not None else set()
+        self.retrieval_gate = (
+            self.retrieval_tools & enabled_names if self.config.retrieval_policy == "gate" else set()
+        )
         self.retrieval_used = False
+        self.retrieval_calls = 0
+        self.repo_brief_enabled = self.config.repo_brief or self.config.retrieval_policy == "brief"
+        if self.config.retrieval_policy == "off":
+            self.repo_brief_enabled = False
+        self.repo_brief_text = ""
         self.extra_template_vars = {"tool_specs": [spec for spec in list_tool_specs() if spec["name"] in self.tools]}
 
         # Initialize memory components if enabled
@@ -132,11 +150,35 @@ class DefaultAgent:
     def add_message(self, role: str, content: str, **kwargs):
         self.messages.append({"role": role, "content": content, **kwargs})
 
+    def _prepare_task(self, task: str) -> str:
+        """Inject a deterministic repository brief into the task, failing open."""
+        self.repo_brief_text = ""
+        if not self.repo_brief_enabled:
+            return task
+        try:
+            from minisweagent.retrieval.brief_tool import build_repo_brief
+
+            brief = build_repo_brief(
+                self.env,
+                task,
+                self.config.repo_brief_max_chars,
+                self.config.repo_brief_max_files,
+            )
+        except Exception as error:  # noqa: BLE001
+            # The brief is an optimization, never a precondition for running.
+            logger.warning(f"Repository brief unavailable: {error}")
+            return task
+        if not brief:
+            return task
+        self.repo_brief_text = brief
+        return f"{task}\n\n<repository_brief>\n{brief.strip()}\n</repository_brief>"
+
     def run(self, task: str, **kwargs) -> tuple[str, str]:
         """Run step() until agent is finished. Return exit status & message"""
         self.started_at = time.monotonic()
         self.budget_phase, self.limit_reason = "solving", ""
-        self.extra_template_vars |= {"task": task, **kwargs}
+        prompt_task = self._prepare_task(task)
+        self.extra_template_vars |= {"task": prompt_task, **kwargs}
 
         # Load session if requested and available
         if self.config.enable_memory and self.config.memory_load_session and self.session_memory:
@@ -350,6 +392,8 @@ class DefaultAgent:
         # Dispatch tool calls if present; otherwise, execute bash as before
         if action.get("kind") == "tool":
             tool_name = action.get("tool_name", "")
+            if tool_name in self.retrieval_tools:
+                self.retrieval_calls += 1
             tool = self.tools.get(tool_name)
             if not tool:
                 output = {"output": f"Unknown tool: {tool_name}", "returncode": 127}

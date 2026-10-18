@@ -12,6 +12,7 @@ from pathlib import Path
 import minisweagent.tools.basic  # noqa: F401
 import minisweagent.tools.code_search  # noqa: F401
 import minisweagent.tools.find_definition  # noqa: F401
+import minisweagent.tools.find_references  # noqa: F401
 import minisweagent.tools.read  # noqa: F401
 import minisweagent.tools.read_many  # noqa: F401
 import minisweagent.tools.replace  # noqa: F401
@@ -121,6 +122,7 @@ class TaskAgent(DefaultAgent):
 
     def run(self, task: str, **kwargs) -> tuple[str, str]:
         self.started_at = time.monotonic()
+        task = self._prepare_task(task)
         self.extra_template_vars |= {"task": task, **kwargs}
         if self.checkpoint.exists():
             checkpoint = json.loads(self.checkpoint.read_text())

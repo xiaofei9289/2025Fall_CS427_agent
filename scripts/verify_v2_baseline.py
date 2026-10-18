@@ -69,6 +69,7 @@ def check_tools() -> None:
     import minisweagent.tools.basic  # noqa: F401
     import minisweagent.tools.code_search  # noqa: F401
     import minisweagent.tools.find_definition  # noqa: F401
+    import minisweagent.tools.find_references  # noqa: F401
     import minisweagent.tools.memory_search  # noqa: F401
     import minisweagent.tools.read  # noqa: F401
     import minisweagent.tools.read_many  # noqa: F401
@@ -76,9 +77,18 @@ def check_tools() -> None:
     import minisweagent.tools.search  # noqa: F401
     from minisweagent.tools import REGISTRY
     from minisweagent.tools.basic import ReadFile, WriteFile
-    from minisweagent.tools.code_search import CodeSearchTool
+    from minisweagent.tools.code_search import CodeContextTool, CodeSearchTool
 
-    expected = {"read_file", "write_file", "code_search", "repo_map", "find_definition", "memory_search"}
+    expected = {
+        "read_file",
+        "write_file",
+        "code_search",
+        "repo_map",
+        "code_context",
+        "find_definition",
+        "find_references",
+        "memory_search",
+    }
     missing = expected - REGISTRY.keys()
     if missing:
         fail(f"tools not registered: {sorted(missing)}")
@@ -93,7 +103,10 @@ def check_tools() -> None:
     search = CodeSearchTool()({"query": "HistoryManager prompt_messages", "limit": 5})
     if search["returncode"] != 0 or "src/minisweagent/memory/history.py" not in search["output"]:
         fail(f"code_search smoke test failed: {search['output'][:500]}")
-    report("ok", f"{len(REGISTRY)} tools registered; read/write and code_search execute")
+    context = CodeContextTool()({"query": "HistoryManager prompt_messages", "max_chars": 1200})
+    if context["returncode"] != 0 or "src/minisweagent/memory/history.py" not in context["output"]:
+        fail(f"code_context smoke test failed: {context['output'][:500]}")
+    report("ok", f"{len(REGISTRY)} tools registered; read/write, code_search and code_context execute")
 
 
 def check_swebench_config() -> None:
@@ -101,13 +114,19 @@ def check_swebench_config() -> None:
 
     from minisweagent.config import get_config_path
 
-    for name in ("baseline", "retrieval"):
+    for name in ("baseline", "brief_only", "retrieval", "retrieval_gate"):
         config = yaml.safe_load(get_config_path(ROOT / "experiments" / "configs" / f"{name}.yaml").read_text())
         if not {"agent", "environment", "model"} <= config.keys():
             fail(f"{name}.yaml is missing agent/environment/model sections")
     retrieval = yaml.safe_load(get_config_path(ROOT / "experiments" / "configs" / "retrieval.yaml").read_text())
-    if not {"code_search", "repo_map"} <= set(retrieval["agent"].get("enabled_tools", [])):
-        fail("retrieval.yaml does not enable code_search and repo_map")
+    tools = set(retrieval["agent"].get("enabled_tools", []))
+    if not {"code_search", "repo_map", "code_context", "find_references"} <= tools:
+        fail("retrieval.yaml does not enable all retrieval tools")
+    if retrieval["agent"].get("retrieval_policy") != "brief" or not retrieval["agent"].get("repo_brief"):
+        fail("retrieval.yaml does not use the brief retrieval policy")
+    gate = yaml.safe_load(get_config_path(ROOT / "experiments" / "configs" / "retrieval_gate.yaml").read_text())
+    if gate["agent"].get("retrieval_policy") != "gate":
+        fail("retrieval_gate.yaml does not preserve the gate policy")
 
     result = subprocess.run(
         [sys.executable, "-m", "minisweagent.run.extra.swebench", "--help"],

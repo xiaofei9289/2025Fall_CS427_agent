@@ -78,15 +78,20 @@ PYTHONPATH=SWE-bench python -m swebench.harness.run_evaluation \
 ## 代码定位
 
 `repo_map` 输出与 issue 相关的 Python 文件、类、函数签名和行范围；
-`code_search` 使用 BM25 与符号名匹配排序，并返回 qualified name、docstring 和行范围。
-`find_definition` 复用同一索引做精确符号查询，支持 async、类型注解/元组赋值变量和 qualified name；不再在容器内 grep。
-模型再用已有读取工具查看候选代码。
+`code_search` 使用 BM25 与符号名匹配排序，并返回 qualified name、docstring 和行范围；
+`code_context` 返回按字符预算截断的签名和代码片段；`find_references` 做轻量的调用/导入/
+基类引用扫描。`find_definition` 复用同一索引做精确符号查询，支持 async、类型注解/元组赋值
+变量和 qualified name；不再在容器内 grep。
 
 索引遵守 Git ignore，包含 tracked 文件和新建的非 ignored Python 文件。
 跳过符号链接、超过 1 MB 的文件和无法解析的文件，并报告跳过原因。
 它在环境内部执行自包含的标准库实现，支持 Python 3.6+；旧解释器的结束行号为近似值。
-当前每次调用重新构建索引，文件修改立即可见；增量索引与 embedding 留给后续有数据支持时加入。
-地图使用字符预算，尚未实现 tokenizer 精确预算。
+大仓库索引按真实根路径和文件 `mtime/ctime/size` 指纹缓存在临时目录，文件修改立即可见；
+可用 `MINISWEAGENT_INDEX_CACHE=0` 关闭。地图和上下文仍使用字符预算，尚未实现 tokenizer 精确预算。
+
+`repo_brief` 是确定性的预检索层：从 issue 中抽取路径、堆栈帧、反引号/qualified 符号，按
+“路径/堆栈 → 精确符号 → BM25 候选”的顺序生成受预算约束的仓库简报，并在任务开始时注入。
+`retrieval_policy` 可设为 `gate`（旧强制首步）、`brief`（注入简报、不 gate）或 `off`。
 
 运行本仓库的人工标注冒烟集，不调用模型：
 
@@ -96,10 +101,35 @@ python -m minisweagent.run.extra.localization_eval \
   --output experiments/localization_smoke_result.json --k 5
 ```
 
-评测分别输出文件级 BM25 与符号级 BM25 的 Recall@K、Hit@K 和 MRR。
-`gold_files` 只用于评分，检索输入仅包含 issue 文本。
+评测分别输出文件级 BM25、符号级 BM25、上下文选择与确定性 `repo_brief` 的
+Recall@K、Hit@K 和 MRR。`gold_files` 只用于评分，检索输入仅包含 issue 文本。
+五题 `repo_brief` 的 Recall@5/Hit@5/MRR 为 0.88 / 1.00 / 0.90，文件级 BM25 为
+0.54 / 0.80 / 0.50；结果在 `experiments/localization_verified5/brief_result.json`。
+这只说明离线候选排序有提升，不能直接外推到在线解决率。
 这 4 条案例验证工具链，不能作为 SWE-bench 修复能力提升的证据。
-正式定位评测需为每个任务提供处于正确 base commit 的 checkout，再按相同格式标注目标文件。
+正式定位评测需为每个任务提供处于正确 base commit 的 checkout；五题副本可用
+`python experiments/localization_verified5/prepare_checkouts.py` 重建，50 题副本复用同一脚本：
+
+```bash
+python experiments/localization_verified5/prepare_checkouts.py \
+  --cases experiments/localization_verified50/cases.json \
+  --output experiments/localization_verified50/checkouts
+```
+
+50 题复核（`experiments/localization_verified50/result.json`）显示上下文选择
+Recall@5/Hit@5/MRR 为 0.691 / 0.76 / 0.560，文件级 BM25 为 0.534 / 0.60 / 0.467，
+确定性 `repo_brief` 为 0.645 / 0.68 / 0.488。五题上 brief 的 0.88 / 1.00 / 0.90 没有在
+50 题保持，说明小样本结果会过拟合；上下文选择是当前更稳的离线候选生成器。
+
+## 检索归因（2026-10-18）
+
+`experiments/gate-20261017/retrieval_audit.md` 逐条解析了强制检索组的五条轨迹：
+官方文件进入首轮 top-10 为 5/5，检索后读取为 5/5，编辑为 4/5，最终解决 3/5。
+Matplotlib-20826 的 `axis.py` 排第 3，模型也读了相关代码，但没有形成编辑而耗尽 50 步；
+Django-11532 读取并编辑了 `message.py`，失败来自更大的邮件测试集。因此当前瓶颈是
+检索后的收敛/编辑/验证，而不是“找不到文件”。同时，旧 gate 组同时改变了工具、提示词和
+强制首步，不能把差异单独归因于检索质量；新对照使用 `brief_only.yaml`、`retrieval.yaml`
+和 `retrieval_gate.yaml` 拆分这些因素。
 
 ## 后续里程碑
 
@@ -171,8 +201,9 @@ TUI confirm 模式对工具动作 KeyError、压缩固定首条任务致续接�
 副本）；scale50 加固为冻结副本挂载。既有 fix5 冻结结果不受影响；修复后源码需在 fix5
 归档后经新目录（fix6）重做五题对照，作为扩量前最后一轮 gate。
 
-1. 五题查找对照和离线定位已完成。文件级 Hit@5 为 4/5；Matplotlib 的官方文件排第 54，见 `experiments/localization_verified5`。
-2. 用相同预算扩到固定任务集之前，先解释邮件题在主文件已命中时仍失败的原因。
+1. 五题查找对照和离线定位已完成。文件级 Hit@5 为 4/5；离线原文查询下 Matplotlib 官方文件排第 54，但在线改写查询后 `axis.py` 排第 3，见 `experiments/localization_verified5` 和 `experiments/gate-20261017/retrieval_audit.md`。
+2. 邮件题在主文件已命中时仍失败的原因已定位：`django__django-11532` 编辑了 `message.py`，但 18 个原有邮件测试在 SMTP `EHLO` 上报错；不是定位失败。下一步应把这类下游失败与检索失败分开统计。
 3. 将历史压缩改为动作/观察配对、token 预算和可追溯证据状态，并加入单独消融组。
 4. 增加复现、修改、验证、提交的阶段状态；区分环境失败与代码失败，预留验证预算。
-5. 用完整对照结果、代表性失败案例与可运行 demo 展示项目。
+5. 已加入确定性 `repo_brief`、轻量 `find_references` 和轨迹级 `retrieval_audit`；下一步用 `baseline` / `brief_only` / `retrieval` / `retrieval_gate` 四臂拆分“预检索上下文”“工具可用性”和“强制首步”，再决定是否扩量。
+6. 用完整对照结果、代表性失败案例与可运行 demo 展示项目。

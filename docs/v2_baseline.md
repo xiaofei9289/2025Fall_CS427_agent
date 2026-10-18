@@ -6,9 +6,10 @@
 
 ## 这一步解决的问题
 
-公开 `origin/main` 停留在较早的提交，缺少本地已经完成的 memory/search、retrieval
-tools、audit 和 localization 实现，因此会出现“`default.py` 引用了不存在的模块”的
-错觉。本地 `main` 已包含这些实现；本分支把该实现作为 V2 起点，并把验证入口固定下来。
+早期公开 `origin/main` 曾停留在缺少 memory/search、retrieval tools、audit 和
+localization 实现的状态，因此会出现“`default.py` 引用了不存在的模块”的错觉。
+当前本地 `main` 与 `origin/main` 都在 `20af3e2`，已包含这些实现；本节保留为历史
+说明，不再描述当前分支差异。
 
 接口核对结果：
 
@@ -16,9 +17,14 @@ tools、audit 和 localization 实现，因此会出现“`default.py` 引用了
 |---|---|---|
 | `default.py: from minisweagent.memory.search import set_search_context` | `src/minisweagent/memory/search.py` | 存在，含 `set_search_context` / `MemorySearch` |
 | `default.py: HistoryManager.prompt_messages(...)` | `src/minisweagent/memory/history.py:374` | 存在 |
-| `code_search` / `repo_map` | `src/minisweagent/tools/code_search.py` | 存在并注册 |
+| `code_search` / `repo_map` / `code_context` | `src/minisweagent/tools/code_search.py` | 存在并注册 |
+| `find_references` | `src/minisweagent/tools/find_references.py` | 存在并注册；轻量 AST 关系扫描 |
+| `repo_brief` | `src/minisweagent/retrieval/brief.py` / `brief_tool.py` | 存在；容器内注入，不依赖安装包 |
+| AST 索引、BM25、上下文与缓存 | `src/minisweagent/retrieval/repository.py` | 存在；容器内注入同一文件执行 |
 | `audit.py` | `src/minisweagent/run/extra/audit.py` | 存在 |
 | `localization_eval.py` | `src/minisweagent/run/extra/localization_eval.py` | 存在 |
+| `retrieval_audit.py` | `src/minisweagent/run/extra/retrieval_audit.py` | 存在；逐轨迹归因 |
+| `prepare_checkouts.py` | `experiments/localization_verified5/prepare_checkouts.py` | 存在；重建冻结副本 |
 
 另外修复了三处会破坏“换个终端/换台机器就复现不了”的问题：
 
@@ -71,17 +77,20 @@ python scripts/verify_v2_baseline.py
 
 - editable 安装是否指向本仓库的 `src/`；
 - `DefaultAgent`、memory/search、audit、localization_eval、swebench 是否可导入；
-- 工具注册表、`read_file` / `write_file`、`code_search` 是否能独立执行；
-- `experiments/configs/baseline.yaml` 与 `retrieval.yaml` 是否能通过 SWE-bench 入口加载；
+- 工具注册表、`read_file` / `write_file`、`code_search` / `code_context` / `find_references` 是否能独立执行；
+- `experiments/configs/baseline.yaml`、`brief_only.yaml`、`retrieval.yaml`、`retrieval_gate.yaml` 是否能通过 SWE-bench 入口加载；
 - 默认离线测试是否通过。
 
 本机验证结果（2026-10-18，Python 3.11.12）：
 
 ```text
-567 passed, 19 skipped, 50 deselected
+674 passed, 19 skipped, 51 deselected
 ```
 
-50 个 deselected 均为 `@pytest.mark.slow`，包括 Docker/Singularity 环境测试、
+服务测试中依赖 `os.killpg` 的用例对沙箱敏感；同一天较早一次运行曾在 DSH 文件沙箱下报
+`PermissionError: Operation not permitted`，最新全量运行通过。台式机上的服务测试仍需单独复跑。
+
+51 个 deselected 均为 `@pytest.mark.slow`，包括 Docker/Singularity 环境测试、
 `test_swebench.py` 的 Docker 端到端流程和需要 HF dummy 数据集网络的用例。它们不是
 V2 的默认门禁；在台式机执行：
 
