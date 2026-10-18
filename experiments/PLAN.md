@@ -124,6 +124,11 @@ fix2 的 off 组首轮 403 全部 `APIError` 终止，改配置后又被 `write_
 50 题扩量配置已预置于 `experiments/memory_scale50_20261018`，仅在五题对照显示开启组通过数
 严格高于关闭组后单次运行，报告同时给出全 50 题与剔除前 5 题调参任务的结果。
 
+三个 TokenFy 单渠道模型（`claude-opus-5`、`gpt-5.6-sol`、`gemini-3.8-flash`）的五题流程验证位于
+`experiments/pilot_tokenfy_20261018`：生成与官方评分链路跑通、零 harness 错误，claude、gpt 各通过
+1 题。三个 key 余额中途耗尽（APIError 均为预扣费失败，gemini 组首题即不足），相关空补丁不构成
+模型对照，待充值后重跑修订；claude 两个完成题均撞 $1 单题硬预算，整组对照前需另设计预算。
+
 1. 五题查找对照和离线定位已完成。文件级 Hit@5 为 4/5；Matplotlib 的官方文件排第 54，见 `experiments/localization_verified5`。
 2. 用相同预算扩到固定任务集之前，先解释邮件题在主文件已命中时仍失败的原因。
 3. 将历史压缩改为动作/观察配对、token 预算和可追溯证据状态，并加入单独消融组。
