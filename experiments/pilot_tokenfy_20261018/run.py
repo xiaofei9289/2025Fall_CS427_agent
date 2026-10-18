@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 
-ARMS = ("claude_opus_5", "gpt_5_6_sol", "gemini_3_8_flash")
+ARMS = ("claude_opus_5", "gpt_5_6_sol", "gemini_3_8_flash", "deepseek_chat")
 
 
 def main() -> None:
@@ -28,7 +28,8 @@ def main() -> None:
         raise SystemExit("Run inside Linux on the desktop; execution on the editing Mac is disabled.")
     study = Path(__file__).resolve().parent
     root = study.parents[1]
-    task_ids = json.loads(Path(args.tasks or study / "tasks.json").read_text())
+    tasks_file = Path(args.tasks) if args.tasks else study / "tasks.json"
+    task_ids = json.loads(tasks_file.read_text())
     incomplete = []
 
     def execute(arm: str, name: str, command: list[str], cwd: Path) -> None:
@@ -55,7 +56,7 @@ def main() -> None:
         if args.phase == "generation":
             execute(arm, directory, [
                 sys.executable, "-m", "minisweagent.run.extra.swebench", "--subset", "verified", "--split", "test",
-                "--instance-ids", str(study / "tasks.json"), "--config", str(study / f"{arm}.yaml"),
+                "--instance-ids", str(tasks_file), "--config", str(study / f"{arm}.yaml"),
                 "--output", str(study / directory), "--workers", "1",
             ], root)
             predictions = json.loads((study / directory / "preds.json").read_text())
