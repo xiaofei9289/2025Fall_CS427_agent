@@ -69,19 +69,15 @@ def wanted(path: str) -> bool:
         return False
     if path == "experiments/PLAN.md":
         return True
+    if parts[1] == "configs" or (len(parts) > 2 and parts[2] == "configs"):
+        return True
     if len(parts) != 3:
         return False
     name = parts[2]
-    if parts[1] == "configs":
-        return True
     return (
-        name in {
-            "README.md", "desktop.py", "evaluate.py", "model_prices.json",
-            "run.py", "run_all.py", "tokenfy_model_registry.json",
-        }
-        or name.endswith((".yaml", ".yml"))
+        name.endswith((".md", ".py", ".yaml", ".yml"))
+        or name in {"model_prices.json", "pilot.json", "tokenfy_model_registry.json"}
         or fnmatch.fnmatch(name, "tasks*.json")
-        or fnmatch.fnmatch(name, "smoke_*.py")
         or name.startswith("Dockerfile")
     )
 

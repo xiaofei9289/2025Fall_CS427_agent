@@ -86,6 +86,7 @@ Run the scoped checks on the desktop using the [deployment guide](deployment/REA
 - Memory extension: `cs427_memory.md`
 - Delivery and interview notes: [project delivery](docs/project_delivery.md)
 - Controlled experiment plan: [experiments/PLAN.md](experiments/PLAN.md)
+- Clean A/B/C memory experiment: [design](experiments/memory_abc_20261019/DESIGN.md) and [runbook](experiments/memory_abc_20261019/README.md)
 - Upstream docs: <https://mini-swe-agent.com/latest/>
 
 ## Acknowledgments

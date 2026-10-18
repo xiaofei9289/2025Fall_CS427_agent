@@ -1,0 +1,108 @@
+# Shared controls for the A/B/C memory experiment.
+#
+# The only treatment difference is agent.memory_policy in the arm overlays:
+#   a.yaml -> window
+#   b.yaml -> summary
+#   c.yaml -> summary_search
+#
+# All arms use the same model, prompt, ordinary tools, task set, step/cost caps,
+# and prompt budget.  The C arm's memory_search tool is installed by the policy,
+# not by enabled_tools, so the three configs stay byte-identical apart from the
+# policy name.
+agent:
+  system_template: |
+    You are a software engineer fixing a bug in the repository at /testbed.
+    Work incrementally: inspect the code, reproduce the issue, edit source files, and verify.
+
+    Respond with exactly ONE action per step, in one of these two forms:
+
+    ```bash
+    <one shell command>
+    ```
+
+    ```tool
+    {"name": "<tool_name>", "args": { ... }}
+    ```
+
+    {% if tool_specs %}
+    Available tools:
+    {% for tool in tool_specs %}- {{ tool.name }}: {{ tool.description }} (parameters: {{ tool.parameters }})
+    {% endfor %}
+    {% endif %}
+
+    Do not modify tests. Do not run interactive commands. If a command produces too much
+    output, use head, tail, grep, or sed to narrow it.
+  instance_template: |
+    <issue>
+    {{ task }}
+    </issue>
+
+    <instructions>
+    Fix the issue by changing non-test source files under /testbed. Keep the change general
+    and consistent with the codebase. You may run the project's tests to check your work.
+
+    You have a full Linux shell. Every action runs in a new subshell, so directory changes
+    and environment variables do not persist; prefix commands with `cd /testbed && ...` when needed.
+
+    When you have a source change, or you cannot make further progress, submit it with exactly:
+
+    ```bash
+    echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git diff HEAD
+    ```
+
+    This submits tracked changes only. You cannot continue after submitting. An empty
+    submission cannot pass the tests.
+    </instructions>
+  action_observation_template: |
+    <returncode>{{ output.returncode }}</returncode>
+    {% if output.output | length < 6000 -%}
+    <output>
+    {{ output.output -}}
+    </output>
+    {%- else -%}
+    <warning>The output was too long and is shown as head and tail.</warning>
+    <output_head>
+    {{ output.output[:3000] }}
+    </output_head>
+    <elided_chars>{{ output.output | length - 6000 }} characters elided</elided_chars>
+    <output_tail>
+    {{ output.output[-3000:] }}
+    </output_tail>
+    {%- endif -%}
+  format_error_template: |
+    Please provide exactly ONE action in triple backticks: either a ```bash block or a
+    ```tool block. You provided {{ actions | length }} action block(s).
+  step_limit: 400
+  cost_limit: 10.0
+  enabled_tools:
+    - read_file
+    - write_file
+    - refined_read_file
+    - search_file_content
+    - replace
+    - find_definition
+    - read_many_files
+  memory_total_tokens: 8000
+  memory_summary_tokens: 1000
+  memory_retrieval_tokens: 1500
+environment:
+  cwd: /testbed
+  timeout: 60
+  pull_timeout: 900
+  run_args:
+    - --rm
+    - --platform
+    - linux/amd64
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: "off"
+    TQDM_DISABLE: "1"
+  environment_class: docker
+model:
+  model_name: deepseek/deepseek-chat
+  model_kwargs:
+    drop_params: true
+    temperature: 0.0
+    timeout: 120
