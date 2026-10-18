@@ -23,7 +23,7 @@ def source_digest(root: Path) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("generation", "grading", "compare", "all"))
-    parser.add_argument("--arm", choices=("off", "on", "both"), default="both")
+    parser.add_argument("--arm", default="both", help="'both', 'all', or one arm name")
     parser.add_argument("--workers", type=int, default=2)
     args = parser.parse_args()
     if platform.system() != "Windows":

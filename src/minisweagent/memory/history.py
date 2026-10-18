@@ -8,6 +8,7 @@ from typing import Any
 _RETURN_RE = re.compile(r"<returncode>(-?\d+)</returncode>")
 _ACTION_RE = re.compile(r"```(bash|tool)\n(.*?)\n```", re.DOTALL)
 _TAG_RE = re.compile(r"</?(?:returncode|output|output_head|output_tail|elided_chars|warning)[^>]*>")
+_REDIRECT_RE = re.compile(r"^\d?(?:>{1,2})(?!&)")
 
 # User messages that are agent feedback rather than a task statement.
 _NOT_TASK_PREFIXES = (
@@ -49,12 +50,27 @@ def _head_and_rest(tokens: list[str]) -> tuple[str, list[str]]:
     return tokens[0], tokens[1:]
 
 
+def _normalize_path(path: str) -> str:
+    """Normalize a repo-relative path so tool and bash evidence name the same file.
+
+    Tool calls report ``/testbed/src/app.py`` while bash commands use either form;
+    staleness tracking only works when both arrive in the same spelling.
+    """
+    path = path.strip().strip("'\"")
+    if not path:
+        return ""
+    return posixpath.normpath(path.removeprefix("/testbed/"))
+
+
 def _bash_read_paths(command: str) -> list[str] | None:
     """Files printed by a pure read command, or None when it is not a plain read.
 
     In-place sed counts as a write, not a read, so it must not be recorded as
-    source evidence.
+    source evidence. Output redirects and heredocs also make a command a write:
+    ``cat > out`` prints nothing and must not be read as evidence about ``out``.
     """
+    if "<<" in command or any(_REDIRECT_RE.match(token) for token in command.split()):
+        return None
     paths: list[str] = []
     for tokens in _segments(command):
         head, rest = _head_and_rest(tokens)
@@ -71,8 +87,8 @@ def _bash_read_paths(command: str) -> list[str] | None:
 def _bash_write(command: str) -> tuple[set[str], bool]:
     """Return (files a bash command may modify, whether it may write to unknown files).
 
-    Unknown-target writes (patch, git apply, heredocs) conservatively invalidate
-    every earlier read; named targets invalidate only their own reads.
+    Unknown-target writes (patch, git apply, interpreter heredocs) conservatively
+    invalidate every earlier read; named targets invalidate only their own reads.
     """
     targets: set[str] = set()
     unknown = False
@@ -109,7 +125,11 @@ def _bash_write(command: str) -> tuple[set[str], bool]:
             }
         ):
             unknown = True
-        if "<<" in " ".join(tokens):
+        heredoc = "<<" in " ".join(tokens)
+        redirected = any(_REDIRECT_RE.match(token) for token in tokens)
+        # A heredoc is only an unknown-target write when it runs an interpreter or has
+        # nowhere explicit to go; ``cat > repro.py <<EOF`` only touches repro.py.
+        if heredoc and (head in {"python", "python3", "sh", "bash", "zsh", "perl", "ruby", "node"} or not redirected):
             unknown = True
         for index, token in enumerate(tokens):
             redirect = re.match(r"^\d?(>{1,2})(.*)$", token)
@@ -254,8 +274,8 @@ class HistoryManager:
             if code is None:
                 continue
             kind, name, args = action
-            path = args.get("path", "")
-            path = posixpath.normpath(path.removeprefix("/testbed/")) if isinstance(path, str) and path else ""
+            raw_path = args.get("path", "")
+            path = _normalize_path(raw_path) if isinstance(raw_path, str) else ""
             operation = json.dumps({key: value for key, value in args.items() if key != "path"}, sort_keys=True)
             key = (kind, name, path, operation) if kind == "tool" else (kind, args["command"])
             label = f"{name} {path}" if kind == "tool" else args["command"]
@@ -294,10 +314,11 @@ class HistoryManager:
                 reads[(kind, args["command"])] = (
                     index + 1,
                     f"- step {step}: {args['command'][:160]}\n{excerpt}",
-                    frozenset(read_paths),
+                    frozenset(_normalize_path(p) for p in read_paths) - {""},
                 )
                 continue
             write_targets, unknown_write = _bash_write(args["command"])
+            write_targets = {_normalize_path(p) for p in write_targets} - {""}
             if unknown_write:
                 reads.clear()
                 reads[("bash-write", step)] = (
@@ -369,15 +390,24 @@ class HistoryManager:
         raise ValueError(f"Unknown history policy: {policy}")
 
     def truncate_tokens(self, messages: list[dict[str, Any]], token_limit: int) -> list[dict[str, Any]]:
-        """Drop oldest non-system messages until the estimate fits, then clip the tail."""
+        """Keep the system prompt and the current task, then drop the oldest of the rest.
+
+        The task is pinned in both policies: losing the problem statement is a goal
+        failure, not a memory failure, and must not be counted as the treatment.
+        """
         if estimate_tokens(messages) <= token_limit:
             return messages
-        system_ids = {id(message) for message in messages if self.keep_system and message.get("role") == "system"}
-        system = [message for message in messages if id(message) in system_ids]
-        rest = [message for message in messages if id(message) not in system_ids]
-        while rest and estimate_tokens(system + rest) > token_limit:
+        system = [message for message in messages if self.keep_system and message.get("role") == "system"]
+        task_index = _current_task_index(messages)
+        prefix = system + ([messages[task_index]] if task_index is not None else [])
+        if estimate_tokens(prefix) > token_limit:
+            # The budget cannot hold the task; fall back to the system prompt alone.
+            prefix = system
+        pinned = {id(message) for message in prefix}
+        rest = [message for message in messages if id(message) not in pinned]
+        while rest and estimate_tokens(prefix + rest) > token_limit:
             rest.pop(0)
-        return self._clip(system + rest, token_limit)
+        return self._clip(prefix + rest, token_limit)
 
     def compress_tokens(self, messages: list[dict[str, Any]], token_limit: int) -> list[dict[str, Any]]:
         """Keep the task, an evidence summary, and as many recent turns as fit."""
@@ -402,6 +432,11 @@ class HistoryManager:
                 recent = turn + recent
             else:
                 break
+        if not recent and turns:
+            # One turn alone exceeds the whole budget (a large file dump or test log).
+            # Keep its action and a clipped observation: a summary with no recent
+            # context would hide the agent's own last step, which truncate never does.
+            return self._clip(prefix + turns[-1], token_limit)
         dropped = sum(len(turn) for turn in turns) - len(recent)
         if not dropped:
             return self._clip(prefix + recent, token_limit)

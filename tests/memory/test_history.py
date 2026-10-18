@@ -362,10 +362,68 @@ def test_token_policies_share_a_limit_and_keep_different_history():
     compressed = HistoryManager().fit(messages, policy="compress", token_limit=limit)
     assert estimate_tokens(truncated) <= limit
     assert estimate_tokens(compressed) <= limit
-    assert "TASK-KEEP" not in "".join(message["content"] for message in truncated)
+    # Both policies pin the task: losing the goal is not the memory treatment.
+    assert any(message["content"] == "TASK-KEEP" for message in truncated)
     assert any(message["content"] == "TASK-KEEP" for message in compressed)
+    # Only the compress arm carries summarized evidence of what it dropped.
+    assert not any(message["content"].startswith("[memory]") for message in truncated)
+    assert any(message["content"].startswith("[memory]") for message in compressed)
     assert "DROPME" not in "".join(message["content"] for message in compressed)
     assert messages == original
+
+
+def test_truncate_pins_the_task_when_the_limit_binds():
+    messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "TASK-STATEMENT"}]
+    for step in range(8):
+        messages += [
+            {"role": "assistant", "content": f"```bash\necho {step}\n```"},
+            {"role": "user", "content": "y" * 400, "extra": {"returncode": 0}},
+        ]
+    for policy in ("truncate", "compress"):
+        sent = HistoryManager().fit(messages, policy=policy, token_limit=250)
+        assert estimate_tokens(sent) <= 250
+        assert any(message["content"] == "TASK-STATEMENT" for message in sent)
+
+
+def test_compress_keeps_the_latest_action_when_one_turn_exceeds_the_budget():
+    # A single file dump larger than the whole budget must not erase the agent's own
+    # last action, which is exactly what the truncate arm would still show.
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "```bash\ncat big.log\n```"},
+        {"role": "user", "content": "Z" * 20000, "extra": {"returncode": 0}},
+    ]
+    sent = HistoryManager().fit(messages, policy="compress", token_limit=200)
+    assert estimate_tokens(sent) <= 200
+    assert any("cat big.log" in message["content"] for message in sent)
+    assert sent[-1]["role"] == "user"
+    assert "truncated to the token limit" in sent[-1]["content"]
+
+
+def test_bash_read_and_tool_write_name_the_same_file():
+    messages = bash_turn("cat /testbed/src/app.py", "STALE_SOURCE")
+    messages += tool_turn("replace", "src/app.py", 0, "replaced")
+    note = HistoryManager().evidence_note(messages)
+    assert "STALE_SOURCE" not in note
+    assert "Modified src/app.py" in note
+
+
+def test_scoped_heredoc_write_is_not_a_read_and_only_touches_its_target():
+    messages = bash_turn("cat app.py", "UNIQUE_SOURCE")
+    messages += bash_turn("cat > repro.py <<'EOF'\nprint(1)\nEOF", "")
+    note = HistoryManager().evidence_note(messages)
+    assert "Read" not in note  # A heredoc is a write, never evidence about the heredoc body.
+    assert "UNIQUE_SOURCE" in note  # But it only wrote repro.py.
+    assert "Modified repro.py" in note
+
+
+def test_interpreter_heredoc_expires_every_earlier_read():
+    messages = bash_turn("cat app.py", "UNIQUE_SOURCE")
+    messages += bash_turn("python - <<'EOF'\nopen('app.py', 'w')\nEOF", "")
+    note = HistoryManager().evidence_note(messages)
+    assert "UNIQUE_SOURCE" not in note
+    assert "unknown targets" in note
 
 
 def test_token_fit_leaves_short_history_unchanged_and_clips_one_huge_message():

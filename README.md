@@ -8,7 +8,7 @@ This repository extends [mini-swe-agent](https://github.com/SWE-agent/mini-swe-a
 
 - `src/minisweagent/`: the agent, environments, models, and the course extensions for tools and memory
 - Tools: `read_file`, `write_file`, `refined_read_file`, `read_many_files`, `search_file_content`, `replace`, `find_definition`, `todo`
-- Memory: `HistoryManager` keeps complete recent action/observation turns and summarizes omitted execution evidence; `memory_search` looks up the full transcript or saved sessions; `SessionMemory` and `TrajectoryReplayer` store and replay runs
+- Memory: `HistoryManager` keeps the task and complete recent action/observation turns, and summarizes omitted execution evidence; `memory_search` returns full matching messages or opens one by index; `SessionMemory` and `TrajectoryReplayer` store and replay runs
 - Retrieval: environment-side Python AST indexing with BM25/symbol search (`code_search`, `repo_map`)
 - Service: persistent FastAPI task queue, per-task Git workspaces, cancellation/resume, checkpoints, budget finalization, event traces, independent tests and candidate patches saved before verification
 - Evaluation: frozen task/config/source manifests, per-run integrity audits and matched baseline/retrieval and [budget finalization comparisons](experiments/budget_20261017)
