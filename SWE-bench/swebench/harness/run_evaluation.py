@@ -157,7 +157,10 @@ def run_instance(
 
         # Copy model prediction as patch file to container
         patch_file = Path(log_dir / "patch.diff")
-        patch_file.write_text(pred[KEY_PREDICTION] or "")
+        patch = (pred[KEY_PREDICTION] or "").replace("\r\n", "\n").replace("\r", "\n")
+        if patch and not patch.endswith("\n"):
+            patch += "\n"
+        patch_file.write_text(patch, encoding="utf-8", newline="\n")
         logger.info(
             f"Intermediate patch for {instance_id} written to {patch_file}, now applying to container..."
         )
@@ -196,7 +199,11 @@ def run_instance(
         logger.info(f"Git diff before:\n{git_diff_output_before}")
 
         eval_file = Path(log_dir / "eval.sh")
-        eval_file.write_text(test_spec.eval_script)
+        eval_file.write_text(
+            test_spec.eval_script.replace("\r\n", "\n").replace("\r", "\n"),
+            encoding="utf-8",
+            newline="\n",
+        )
         logger.info(
             f"Eval script for {instance_id} written to {eval_file}; copying to container..."
         )
@@ -208,7 +215,7 @@ def run_instance(
         )
         test_output_path = log_dir / LOG_TEST_OUTPUT
         logger.info(f"Test runtime: {total_runtime:_.2f} seconds")
-        with open(test_output_path, "w") as f:
+        with open(test_output_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(test_output)
             logger.info(f"Test output for {instance_id} written to {test_output_path}")
             if timed_out:

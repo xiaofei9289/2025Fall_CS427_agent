@@ -5,12 +5,12 @@ from pathlib import Path
 
 import typer
 import yaml
-from datasets import load_dataset
 
 from minisweagent import global_config_dir
 from minisweagent.agents.interactive import InteractiveAgent
 from minisweagent.config import builtin_config_dir, get_config_path
 from minisweagent.models import get_model
+from minisweagent.run.extra.hf_dataset import load_hf_dataset
 from minisweagent.run.extra.swebench import (
     DATASET_MAPPING,
     get_sb_environment,
@@ -42,7 +42,7 @@ def main(
     logger.info(f"Loading dataset from {dataset_path}, split {split}...")
     instances = {
         inst["instance_id"]: inst  # type: ignore
-        for inst in load_dataset(dataset_path, split=split)
+        for inst in load_hf_dataset(dataset_path, split)
     }
     if instance_spec.isnumeric():
         instance_spec = sorted(instances.keys())[int(instance_spec)]

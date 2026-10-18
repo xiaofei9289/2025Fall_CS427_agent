@@ -1,19 +1,63 @@
 import json
+import subprocess
 from dataclasses import asdict, dataclass
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+import yaml
+from typer.testing import CliRunner
 
 from minisweagent import package_dir
 from minisweagent.models.test_models import DeterministicModel
 from minisweagent.run.extra.swebench import (
+    app,
     filter_instances,
+    finalize_submission,
     get_swebench_docker_image_name,
     main,
     remove_from_preds_file,
+    sanitize_submission_patch,
     update_preds_file,
 )
+
+
+@pytest.mark.parametrize("entrypoint", ["python", "cli"])
+def test_python_and_cli_defaults_export_a_real_patch(tmp_path, monkeypatch, reset_global_stats, entrypoint):
+    """Both entry points preserve configured defaults and produce a real patch."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "app.py").write_text("value = 1\n")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.org",
+                    "commit", "-qm", "fixture"], check=True)
+    config = {
+        "agent": {"step_limit": 3, "enabled_tools": []},
+        "environment": {"environment_class": "local", "cwd": str(repo)},
+        "model": {"model_class": "deterministic", "model_name": "fixture", "cost_per_call": 0.0,
+                  "outputs": ["```bash\nprintf 'value = 2\\n' > app.py\n```",
+                              "```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git diff HEAD\n```"]},
+    }
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.safe_dump(config))
+    monkeypatch.setattr("minisweagent.run.extra.swebench.load_hf_dataset", lambda *args, **kwargs: [
+        {"instance_id": "fixture-1", "problem_statement": "Change value to 2"},
+    ])
+    output = tmp_path / "run"
+    if entrypoint == "python":
+        main(subset="_test", split="test", output=str(output), config_spec=config_file)
+    else:
+        result = CliRunner().invoke(app, ["--subset", "_test", "--split", "test", "--output", str(output),
+                                          "--config", str(config_file)])
+        assert result.exit_code == 0, result.output + repr(result.exception)
+    manifest = json.loads((output / "run_manifest.json").read_text())
+    assert manifest["config"] == config
+    prediction = json.loads((output / "preds.json").read_text())["fixture-1"]
+    assert "+value = 2" in prediction["model_patch"]
+    trajectory = json.loads((output / "fixture-1" / "fixture-1.traj.json").read_text())
+    assert trajectory["info"]["exit_status"] == "Submitted"
+    assert trajectory["run_id"] == manifest["run_id"]
 
 
 @pytest.mark.slow
@@ -296,78 +340,44 @@ def test_remove_from_preds_file_no_file(tmp_path):
 
 @pytest.mark.slow
 def test_redo_existing_false_skips_existing(github_test_data, tmp_path):
-    """Test that redo_existing=False skips instances that already have results"""
-    model_responses = github_test_data["model_responses"]
-
-    # Create existing preds.json with one instance
+    """An existing, manifested run is skipped without another model call."""
+    options = dict(subset="_test", split="test", slice_spec="0:1", output=str(tmp_path), workers=1,
+                   filter_spec="swe-agent__test-repo-1", environment_class="docker",
+                   config_spec=package_dir / "config" / "extra" / "swebench.yaml")
     preds_file = tmp_path / "preds.json"
-    existing_data = {
-        "swe-agent__test-repo-1": {
-            "model_name_or_path": "previous_model",
-            "instance_id": "swe-agent__test-repo-1",
-            "model_patch": "previous_result",
-        }
-    }
-    preds_file.write_text(json.dumps(existing_data))
-
     with patch("minisweagent.run.extra.swebench.get_model") as mock_get_model:
-        mock_get_model.return_value = DeterministicModel(outputs=model_responses)
-
-        main(
-            subset="_test",
-            split="test",
-            slice_spec="0:1",
-            output=str(tmp_path),
-            workers=1,
-            filter_spec="swe-agent__test-repo-1",
-            redo_existing=False,
-            config_spec=package_dir / "config" / "extra" / "swebench.yaml",
-        )
-
-    # Should still have the original result
-    result = json.loads(preds_file.read_text())
-    assert result == existing_data
+        mock_get_model.return_value = DeterministicModel(outputs=github_test_data["model_responses"], cost_per_call=0.1)
+        main(**options)
+        existing_data = json.loads(preds_file.read_text())
+        original_manifest = (tmp_path / "run_manifest.json").read_bytes()
+        mock_get_model.reset_mock()
+        main(**options, redo_existing=False)
+        mock_get_model.assert_not_called()
+    assert json.loads(preds_file.read_text()) == existing_data
+    assert (tmp_path / "run_manifest.json").read_bytes() == original_manifest
 
 
 @pytest.mark.slow
 def test_redo_existing_true_overwrites_existing(github_test_data, tmp_path):
-    """Test that redo_existing=True processes instances even if they already have results"""
-    model_responses = github_test_data["model_responses"]
-
-    # Create existing preds.json with one instance
+    """Redo replaces a prior run's output while retaining the same manifest."""
+    options = dict(subset="_test", split="test", slice_spec="0:1", output=str(tmp_path), workers=1,
+                   filter_spec="swe-agent__test-repo-1", environment_class="docker",
+                   config_spec=package_dir / "config" / "extra" / "swebench.yaml")
     preds_file = tmp_path / "preds.json"
-    existing_data = {
-        "swe-agent__test-repo-1": {
-            "model_name_or_path": "previous_model",
-            "instance_id": "swe-agent__test-repo-1",
-            "model_patch": "previous_result",
-        }
-    }
-    preds_file.write_text(json.dumps(existing_data))
-
     with patch("minisweagent.run.extra.swebench.get_model") as mock_get_model:
-        mock_get_model.return_value = DeterministicModel(outputs=model_responses, cost_per_call=0.1)
-
-        main(
-            subset="_test",
-            split="test",
-            slice_spec="0:1",
-            output=str(tmp_path),
-            workers=1,
-            filter_spec="swe-agent__test-repo-1",
-            redo_existing=True,
-            config_spec=package_dir / "config" / "extra" / "swebench.yaml",
-            environment_class="docker",
-        )
-
-    # Should have new result from deterministic model
-    traj_file_path = package_dir.parent.parent / "tests" / "test_data" / "github_issue.traj.json"
-    trajectory = json.loads(traj_file_path.read_text())
-    expected_result = trajectory[-1]["content"]
-
-    result = json.loads(preds_file.read_text())
-    assert result["swe-agent__test-repo-1"]["model_patch"] == expected_result
-    assert result["swe-agent__test-repo-1"]["model_name_or_path"] == "deterministic"
+        mock_get_model.return_value = DeterministicModel(outputs=github_test_data["model_responses"],
+                                                       cost_per_call=0.1, model_name="previous_model")
+        main(**options)
+        assert json.loads(preds_file.read_text())["swe-agent__test-repo-1"]["model_name_or_path"] == "previous_model"
+        original_manifest = (tmp_path / "run_manifest.json").read_bytes()
+        mock_get_model.return_value = DeterministicModel(outputs=github_test_data["model_responses"], cost_per_call=0.1)
+        main(**options, redo_existing=True)
+        assert mock_get_model.call_count == 2
+    trajectory = json.loads((package_dir.parent.parent / "tests" / "test_data" / "github_issue.traj.json").read_text())
+    result = json.loads(preds_file.read_text())["swe-agent__test-repo-1"]
+    assert result["model_patch"] == trajectory[-1]["content"]
+    assert result["model_name_or_path"] == "deterministic"
+    assert (tmp_path / "run_manifest.json").read_bytes() == original_manifest
 
 
 @dataclass
@@ -493,3 +503,52 @@ def test_exception_handling_with_progress_manager(tmp_path):
 
             # on_uncaught_exception should not be called since exceptions are handled properly
             mock_progress_manager.on_uncaught_exception.assert_not_called()
+
+
+def test_sanitize_submission_patch_drops_scratch_files():
+    patch = """diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 111..222 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -1 +1 @@
+-old
++new
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 000..333
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1 @@
++print("bug")
+diff --git a/_build/index.doctree b/_build/index.doctree
+index 444..555
+--- a/_build/index.doctree
++++ b/_build/index.doctree
+@@ -1 +1 @@
+-a
++b
+"""
+    cleaned = sanitize_submission_patch(patch)
+    assert "query.py" in cleaned
+    assert "reproduce_issue.py" not in cleaned
+    assert "_build" not in cleaned
+
+
+def test_finalize_submission_recovers_empty_result():
+    class Env:
+        def execute(self, command):
+            assert command == "git diff HEAD"
+            return {
+                "returncode": 0,
+                "output": "diff --git a/pkg/app.py b/pkg/app.py\nindex 1..2\n--- a/pkg/app.py\n+++ b/pkg/app.py\n",
+            }
+
+    result, status = finalize_submission("", Env(), "LimitsExceeded")
+    assert status == "RecoveredPatch"
+    assert "pkg/app.py" in result
+
+
+def test_finalize_submission_keeps_non_patch_error():
+    result, status = finalize_submission("Agent processing failed", None, "RuntimeError")
+    assert result == "Agent processing failed"
+    assert status == "RuntimeError"

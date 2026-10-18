@@ -130,6 +130,39 @@ def run_sequential(func, payloads):
     return succeeded, failed
 
 
+def _load_hf_dataset(name: str, split: str):
+    """Read the local dataset cache. Connect to the Hub only when the cache has no copy."""
+    import os
+
+    keys = ("HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE")
+    saved = {key: os.environ.get(key) for key in keys}
+
+    def restore() -> None:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    os.environ.update({"HF_HUB_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1"})
+    try:
+        return load_dataset(name, split=split)
+    except Exception as error:
+        missed = isinstance(error.__cause__, FileNotFoundError) or any(
+            label in f"{type(error).__name__}: {error}" for label in ("OfflineModeIsEnabled", "LocalEntryNotFoundError")
+        )
+        if not missed:
+            raise
+    finally:
+        restore()
+    for key in keys:
+        os.environ.pop(key, None)
+    try:
+        return load_dataset(name, split=split)
+    finally:
+        restore()
+
+
 def load_swebench_dataset(
     name="SWE-bench/SWE-bench", split="test", instance_ids=None
 ) -> list[SWEbenchInstance]:
@@ -159,7 +192,7 @@ def load_swebench_dataset(
         if (Path(name) / split / "dataset_info.json").exists():
             dataset = cast(Dataset, load_from_disk(Path(name) / split))
         else:
-            dataset = cast(Dataset, load_dataset(name, split=split))
+            dataset = cast(Dataset, _load_hf_dataset(name, split))
     dataset_ids = {instance[KEY_INSTANCE_ID] for instance in dataset}
     if instance_ids:
         if instance_ids - dataset_ids:

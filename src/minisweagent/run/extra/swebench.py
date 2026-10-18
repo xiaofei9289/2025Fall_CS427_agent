@@ -4,6 +4,7 @@
 # Read this first: https://mini-swe-agent.com/latest/usage/swebench/  (usage docs)
 
 import concurrent.futures
+import copy
 import json
 import random
 import re
@@ -11,10 +12,10 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from typing import Annotated
 
 import typer
 import yaml
-from datasets import load_dataset
 from jinja2 import StrictUndefined, Template
 from rich.live import Live
 
@@ -23,16 +24,19 @@ from minisweagent.agents.default import DefaultAgent
 from minisweagent.config import builtin_config_dir, get_config_path
 from minisweagent.environments import get_environment
 from minisweagent.models import get_model
+from minisweagent.run.extra.experiment import write_manifest
+from minisweagent.run.extra.hf_dataset import load_hf_dataset
 from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
 
 try:  # pragma: no cover
     import minisweagent.tools.basic  # noqa: F401
-
-    import minisweagent.tools.read  # noqa: F401
-    import minisweagent.tools.search  # noqa: F401
-    import minisweagent.tools.replace  # noqa: F401
+    import minisweagent.tools.code_search  # noqa: F401
     import minisweagent.tools.find_definition  # noqa: F401
+    import minisweagent.tools.memory_search  # noqa: F401
+    import minisweagent.tools.read  # noqa: F401
     import minisweagent.tools.read_many  # noqa: F401
+    import minisweagent.tools.replace  # noqa: F401
+    import minisweagent.tools.search  # noqa: F401
 except Exception:  # noqa: BLE001
     pass
 from minisweagent.run.utils.save import save_traj
@@ -167,6 +171,67 @@ def get_sb_environment(config: dict, instance: dict) -> Environment:
     return env
 
 
+_JUNK_NAME = re.compile(r"^(reproduce\w*|run_test|test_fix|apply_patch|mock_query)\.py$")
+
+
+def _is_junk_diff_path(path: str, header: str) -> bool:
+    """Drop reproduction scripts, generated files, and new files left at the repo root."""
+    if path.startswith("_build/") or "/_build/" in path:
+        return True
+    if path.endswith((".doctree", ".pyc", ".png", ".so")):
+        return True
+    name = path.rsplit("/", 1)[-1]
+    if _JUNK_NAME.match(name):
+        return True
+    new_file = any(line.startswith("new file mode ") for line in header.splitlines()[:8])
+    return new_file and "/" not in path
+
+
+def sanitize_submission_patch(text: str) -> str:
+    """Keep source diffs and drop scratch files that make a submission fail to apply."""
+    if not text or "diff --git " not in text:
+        return ""
+    parts = re.split(r"(?=^diff --git )", text, flags=re.M)
+    kept: list[str] = []
+    for part in parts:
+        if not part.startswith("diff --git "):
+            continue
+        first = part.splitlines()[0]
+        match = re.match(r"diff --git a/(.+?) b/(.+)$", first)
+        path = match.group(1) if match else ""
+        if _is_junk_diff_path(path, part):
+            continue
+        kept.append(part if part.endswith("\n") else part + "\n")
+    return "".join(kept)
+
+
+def recover_tracked_patch(env: Environment) -> str:
+    """Read the diff of tracked files when the agent exits without a submission."""
+    try:
+        output = env.execute("git diff HEAD")
+    except Exception:
+        return ""
+    if output.get("returncode") != 0:
+        return ""
+    return sanitize_submission_patch(output.get("output") or "")
+
+
+def finalize_submission(result: str, env: Environment | None, exit_status: str) -> tuple[str, str]:
+    """Return a source patch, recovering one from the worktree when the agent did not submit."""
+    cleaned = sanitize_submission_patch(result)
+    if cleaned:
+        return cleaned, exit_status
+    had_patch = "diff --git " in (result or "")
+    stopped_early = exit_status in {"LimitsExceeded", "ModelResponseError"}
+    should_recover = had_patch or not (result or "").strip() or stopped_early
+    if not should_recover or env is None:
+        return result, exit_status
+    recovered = recover_tracked_patch(env)
+    if recovered:
+        return recovered, "RecoveredPatch"
+    return ("" if had_patch or stopped_early else result), exit_status
+
+
 def update_preds_file(output_path: Path, instance_id: str, model_name: str, result: str):
     """Update the output JSON file with results from a single instance."""
     with _OUTPUT_FILE_LOCK:
@@ -197,6 +262,7 @@ def process_instance(
     output_dir: Path,
     config: dict,
     progress_manager: RunBatchProgressManager,
+    run_id: str = "",
 ) -> None:
     """Process a single SWEBench instance."""
     instance_id = instance["instance_id"]
@@ -204,6 +270,7 @@ def process_instance(
     # avoid inconsistent state if something here fails and there's leftover previous files
     remove_from_preds_file(output_dir / "preds.json", instance_id)
     (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
+    config = copy.deepcopy(config)
     model = get_model(config=config.get("model", {}))
     task = instance["problem_statement"]
 
@@ -212,6 +279,7 @@ def process_instance(
 
     agent = None
     extra_info = None
+    env = None
 
     try:
         env = get_sb_environment(config, instance)
@@ -223,10 +291,15 @@ def process_instance(
             **config.get("agent", {}),
         )
         exit_status, result = agent.run(task)
+        extra_info = {"agent_exit_status": exit_status}
+        result, exit_status = finalize_submission(result, env, exit_status)
     except Exception as e:
         logger.error(f"Error processing instance {instance_id}: {e}", exc_info=True)
         exit_status, result = type(e).__name__, str(e)
         extra_info = {"traceback": traceback.format_exc()}
+        recovered, recovered_status = finalize_submission("", env, exit_status)
+        if recovered:
+            result, exit_status = recovered, recovered_status
     finally:
         save_traj(
             agent,
@@ -235,6 +308,7 @@ def process_instance(
             result=result,
             extra_info=extra_info,
             instance_id=instance_id,
+            run_id=run_id,
             print_fct=logger.info,
         )
         update_preds_file(output_dir / "preds.json", instance_id, model.config.model_name, result)
@@ -261,7 +335,7 @@ def load_verified_instances(variant: str) -> list[dict]:
         raise ValueError(f"Unknown variant: {variant}. Available variants: {list(variant_mapping.keys())}")
 
     instance_ids = variant_mapping[variant]
-    verified_instances = list(load_dataset("princeton-nlp/SWE-Bench_Verified", split="test"))
+    verified_instances = list(load_hf_dataset("princeton-nlp/SWE-Bench_Verified", "test"))
     filtered_instances = [instance for instance in verified_instances if instance["instance_id"] in instance_ids]
 
     return filtered_instances
@@ -290,18 +364,19 @@ def filter_instances(
 # fmt: off
 @app.command(help=_HELP_TEXT)
 def main(
-    subset: str = typer.Option("lite", "--subset", help="SWEBench subset to use or path to a dataset", rich_help_panel="Data selection"),
-    split: str = typer.Option("dev", "--split", help="Dataset split", rich_help_panel="Data selection"),
-    slice_spec: str = typer.Option("", "--slice", help="Slice specification (e.g., '0:5' for first 5 instances)", rich_help_panel="Data selection"),
-    filter_spec: str = typer.Option("", "--filter", help="Filter instance IDs by regex", rich_help_panel="Data selection"),
-    shuffle: bool = typer.Option(False, "--shuffle", help="Shuffle instances", rich_help_panel="Data selection"),
-    output: str = typer.Option("", "-o", "--output", help="Output directory", rich_help_panel="Basic"),
-    workers: int = typer.Option(1, "-w", "--workers", help="Number of worker threads for parallel processing", rich_help_panel="Basic"),
-    model: str | None = typer.Option(None, "-m", "--model", help="Model to use", rich_help_panel="Basic"),
-    model_class: str | None = typer.Option(None, "-c", "--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced"),
-    redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
-    config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
-    environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
+    subset: Annotated[str, typer.Option("--subset", help="SWEBench subset to use or path to a dataset", rich_help_panel="Data selection")] = "lite",
+    split: Annotated[str, typer.Option("--split", help="Dataset split", rich_help_panel="Data selection")] = "dev",
+    slice_spec: Annotated[str, typer.Option("--slice", help="Slice specification (e.g., '0:5' for first 5 instances)", rich_help_panel="Data selection")] = "",
+    filter_spec: Annotated[str, typer.Option("--filter", help="Filter instance IDs by regex", rich_help_panel="Data selection")] = "",
+    shuffle: Annotated[bool, typer.Option("--shuffle", help="Shuffle instances", rich_help_panel="Data selection")] = False,
+    output: Annotated[str, typer.Option("-o", "--output", help="Output directory", rich_help_panel="Basic")] = "",
+    workers: Annotated[int, typer.Option("-w", "--workers", help="Number of worker threads for parallel processing", rich_help_panel="Basic")] = 1,
+    model: Annotated[str | None, typer.Option("-m", "--model", help="Model to use", rich_help_panel="Basic")] = None,
+    model_class: Annotated[str | None, typer.Option("--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced")] = None,
+    redo_existing: Annotated[bool, typer.Option("--redo-existing", help="Redo existing instances", rich_help_panel="Data selection")] = False,
+    config_spec: Annotated[Path, typer.Option("-c", "--config", help="Path to a config file", rich_help_panel="Basic")] = builtin_config_dir / "extra" / "swebench.yaml",
+    environment_class: Annotated[str | None, typer.Option("--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced")] = None,
+    instance_ids: Annotated[Path | None, typer.Option("--instance-ids", help="JSON list fixing the task IDs and their order.", exists=True, dir_okay=False)] = None,
 ) -> None:
     # fmt: on
     output_path = Path(output)
@@ -315,9 +390,22 @@ def main(
         instances = load_verified_instances(subset)
     else:
         logger.info(f"Loading dataset {dataset_path}, split {split}...")
-        instances = list(load_dataset(dataset_path, split=split))
+        instances = list(load_hf_dataset(dataset_path, split))
 
+    if instance_ids is not None:
+        pinned_ids = json.loads(instance_ids.read_text())
+        if not isinstance(pinned_ids, list) or not all(isinstance(i, str) for i in pinned_ids) or len(set(pinned_ids)) != len(pinned_ids):
+            raise ValueError("--instance-ids must contain a JSON list of unique instance ID strings.")
+        by_id = {instance["instance_id"]: instance for instance in instances}
+        if missing := set(pinned_ids) - by_id.keys():
+            raise ValueError(f"Pinned tasks are missing from the dataset: {sorted(missing)}")
+        instances = [by_id[instance_id] for instance_id in pinned_ids]
     instances = filter_instances(instances, filter_spec=filter_spec, slice_spec=slice_spec, shuffle=shuffle)
+    selected_ids = [instance["instance_id"] for instance in instances]
+    selected_tasks = sorted(
+        [{key: instance.get(key) for key in ("instance_id", "repo", "base_commit", "version", "problem_statement")} for instance in instances],
+        key=lambda task: task["instance_id"],
+    )
     if not redo_existing and (output_path / "preds.json").exists():
         existing_instances = list(json.loads((output_path / "preds.json").read_text()).keys())
         logger.info(f"Skipping {len(existing_instances)} existing instances")
@@ -333,6 +421,7 @@ def main(
     if model_class is not None:
         config.setdefault("model", {})["model_class"] = model_class
 
+    manifest = write_manifest(output_path, config, selected_ids, workers, selected_tasks)
     progress_manager = RunBatchProgressManager(len(instances), output_path / f"exit_statuses_{time.time()}.yaml")
 
     def process_futures(futures: dict[concurrent.futures.Future, str]):
@@ -349,7 +438,7 @@ def main(
     with Live(progress_manager.render_group, refresh_per_second=4):
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(process_instance, instance, output_path, config, progress_manager): instance[
+                executor.submit(process_instance, instance, output_path, config, progress_manager, manifest["run_id"]): instance[
                     "instance_id"
                 ]
                 for instance in instances
