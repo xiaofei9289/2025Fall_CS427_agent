@@ -20,13 +20,15 @@ def main() -> None:
     parser.add_argument("phase", choices=["generation", "grading"])
     parser.add_argument("--config", default="baseline.yaml", help="Config file in this directory")
     parser.add_argument("--tag", required=True, help="Output directory name and grading run id suffix (e.g. baseline_r1)")
+    parser.add_argument("--tasks", default="tasks.json", help="Task-list JSON relative to this study")
     parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
     if platform.system() != "Linux":
         raise SystemExit("Run inside Linux on the desktop; execution on the editing Mac is disabled.")
     study = Path(__file__).resolve().parent
     root = study.parents[1]
-    task_ids = json.loads((study / "tasks.json").read_text())
+    tasks_path = study / args.tasks
+    task_ids = json.loads(tasks_path.read_text())
     output_dir = study / args.tag
 
     def execute(name: str, command: list[str], cwd: Path) -> None:
@@ -51,7 +53,7 @@ def main() -> None:
     if args.phase == "generation":
         execute("generation", [
             sys.executable, "-m", "minisweagent.run.extra.swebench", "--subset", "verified", "--split", "test",
-            "--instance-ids", str(study / "tasks.json"), "--config", str(study / args.config),
+            "--instance-ids", str(tasks_path), "--config", str(study / args.config),
             "--output", str(output_dir), "--workers", str(args.workers),
         ], root)
         predictions = json.loads((output_dir / "preds.json").read_text())
