@@ -75,7 +75,7 @@ memory 以负结果收尾，不再跑 50 题 memory 对照；若继续，需要�
 0.645/0.68。检索在线收益仍未验证；gate 审计显示 5/5 找到官方文件、4/5 编辑、3/5 解决，
 瓶颈在检索后的收敛和验证。
 
-当前回归：本机 **690 passed, 18 skipped, 52 deselected**；台式机 checks **417 passed**，
+当前回归：本机 **690 passed, 18 skipped, 52 deselected**；台式机 checks **419 passed**，
 slow gate **9 passed**。新增 `tests/tools/test_retrieval_docker.py` 覆盖 `code_context` 和
 `find_references` 的容器路径（slow）。完整报告见
 [report_20261019.pdf](../deliverables_final/report_20261019.pdf)。

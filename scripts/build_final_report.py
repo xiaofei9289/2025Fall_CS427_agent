@@ -327,7 +327,7 @@ def build():
 
     heading(doc, "6. 可复现性与测试", 1)
     bullet(doc, "本机：690 passed, 18 skipped, 52 deselected；Ruff 通过。")
-    bullet(doc, "台式机：checks 417 passed, 10 deselected；slow gate 9 passed。")
+    bullet(doc, "台式机：checks 419 passed, 11 deselected；slow gate 9 passed。")
     bullet(doc, "所有 SWE-bench run 记录 source fingerprint、题目列表、配置和官方评分；实验目录保留历史结果。")
     bullet(doc, "新增 tests/tools/test_retrieval_docker.py，覆盖 code_context / find_references 的容器路径（slow）。")
     code(doc, "pytest -q\npytest -q -m slow\npython scripts/verify_v2_baseline.py")

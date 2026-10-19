@@ -28,7 +28,7 @@ This repository extends [mini-swe-agent](https://github.com/SWE-agent/mini-swe-a
   0.76, file-level BM25 0.534 / 0.60. See
   [50-case results](experiments/localization_verified50/result.json).
 - **Reproducibility**: 690 passed, 18 skipped, 52 deselected locally; desktop
-  checks 417 passed, slow gate 9 passed.
+  checks 419 passed, slow gate 9 passed.
 - **Final report**: [deliverables_final/report_20261019.pdf](deliverables_final/report_20261019.pdf).
 
 ## Installation
