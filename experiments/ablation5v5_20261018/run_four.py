@@ -6,10 +6,10 @@ from pathlib import Path
 
 STUDY = Path(__file__).resolve().parent
 ARMS = {
-    "baseline_tool": "configs4/baseline.yaml",
-    "brief_tool": "configs4/brief_only.yaml",
-    "retrieval_tool": "configs4/retrieval.yaml",
-    "gate_tool": "configs4/retrieval_gate.yaml",
+    "baseline_tool": "configs/baseline.yaml",
+    "brief_tool": "configs/brief_only.yaml",
+    "retrieval_tool": "configs/retrieval.yaml",
+    "gate_tool": "configs/retrieval_gate.yaml",
 }
 
 
