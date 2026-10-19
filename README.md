@@ -27,6 +27,10 @@ This repository extends [mini-swe-agent](https://github.com/SWE-agent/mini-swe-a
 - **Offline localization, 50 tasks**: context selection Recall@5 0.691 / Hit@5
   0.76, file-level BM25 0.534 / 0.60. See
   [50-case results](experiments/localization_verified50/result.json).
+- **Four-arm tool ablation (10 tasks, one round)**: baseline 8/10, brief 8/10,
+  retrieval 9/10, gate 9/10. The plain retrieval arm made **0 retrieval tool
+  calls**, so this is not a tool-effect result. See
+  [four-arm report](experiments/ablation5v5_20261018/FOUR_ARM_20261019.md).
 - **Reproducibility**: 690 passed, 18 skipped, 52 deselected locally; desktop
   checks 419 passed, slow gate 9 passed.
 - **Final report**: [deliverables_final/report_20261019.pdf](deliverables_final/report_20261019.pdf).

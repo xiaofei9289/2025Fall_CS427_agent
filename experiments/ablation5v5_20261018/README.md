@@ -58,3 +58,21 @@ python experiments/ablation5v5_20261018/run.py grading --config baseline.yaml --
 单轮 50 题结果不足以支持 retrieval 的因果结论；本目录的用途是把 37–42 的运行方差先量化，
 再用多轮配对比较。42/50 的 scale baseline 不应被当作固定真值，memory 等其他组件的
 单轮 ±2 题差异也不能直接归因。
+
+## 2026-10-19 四臂工具 ablation（一轮）
+
+使用 `tasks10.json`、四份 `configs/{baseline,brief_only,retrieval,retrieval_gate}.yaml`
+和 `desktop.py` 完成一轮 generation + official grading：
+
+| Arm | Resolved | Cost | Calls | Retrieval tool calls |
+| --- | ---: | ---: | ---: | ---: |
+| baseline | 8/10 | $0.1023 | 217 | 0 |
+| brief | 8/10 | $0.0806 | 201 | 0 |
+| retrieval | 9/10 | $0.0499 | 139 | **0** |
+| gate | 9/10 | $0.1014 | 268 | 10 |
+
+关键的负面发现：**retrieval 臂没有调用任何检索工具**，所以 9/10 不能归因于
+`code_search` / `repo_map` / `code_context` / `find_references`；gate 臂强制调用了
+`repo_map` 和 `code_search`，与 retrieval 同为 9/10，但成本约为 2 倍、调用 268 vs 139。
+按预注册规则停止同一 config 的第二轮，先修工具曝光或把 gate 明确当作 package treatment。
+详见 [FOUR_ARM_20261019.md](FOUR_ARM_20261019.md)。

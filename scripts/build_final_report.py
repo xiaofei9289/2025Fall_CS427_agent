@@ -158,7 +158,8 @@ def build():
         "A/B/C p2final（A 9/10、B 7/10、C 7/10，C 仅 3 次 memory_search，C−B=0）是一次"
         "有效 run，却不是检索的因果实验。当前不能声称 memory/search 提升 SWE-bench；"
         "repair workflow 也还没有在线对照。报告因此把“已验证的工程能力”和“尚未验证的性能"
-        "收益”明确分开。",
+        "收益”明确分开。四臂工具 ablation 的首轮结果为 8/8/9/9，但 plain retrieval 臂"
+        "没有调用任何检索工具，因此同样不能归因于工具效应。",
     )
 
     heading(doc, "1. 系统设计", 1)
@@ -309,6 +310,31 @@ def build():
         "Django 2,927 文件冷启动约 9.4–9.6 秒，缓存命中约 0.6–0.7 秒。",
     )
 
+    heading(doc, "4.1 四臂工具 ablation（2026-10-19，一轮）", 2)
+    body(
+        doc,
+        "同一源码、10 题、2 workers、官方 grading；四臂分别为 baseline、brief、retrieval、gate。",
+    )
+    table(
+        doc,
+        ["Arm", "Resolved", "Cost", "Calls", "Retrieval tool calls"],
+        [
+            ["baseline", "8/10", "$0.1023", "217", "0"],
+            ["brief", "8/10", "$0.0806", "201", "0"],
+            ["retrieval", "9/10", "$0.0499", "139", "0"],
+            ["gate", "9/10", "$0.1014", "268", "10"],
+        ],
+        widths=[2.4, 2.4, 2.8, 2.6, 4.0],
+    )
+    bullet(doc, "retrieval 臂没有调用任何 code_search/repo_map/code_context/find_references；9/10 不能归因于检索工具。")
+    bullet(doc, "gate 强制调用了 repo_map/code_search，与 retrieval 同为 9/10，但成本约 2 倍、调用 268 vs 139。")
+    bullet(doc, "四臂均 10/10 completed，无空补丁、无评分错误；A/B 的 8/10 与 C/D 的 9/10 只差 1 题，单轮不显著。")
+    body(
+        doc,
+        "按预注册规则，工具调用为 0 时停止同一 config 的第二轮；先修工具曝光，或把 gate 明确当作"
+        "package treatment。当前不能声称工具提升了解决率。",
+    )
+
     heading(doc, "5. 修复工作流与服务", 1)
     body(
         doc,
@@ -346,7 +372,7 @@ def build():
             ["离线检索有信号", "50 题 context selection 0.691 vs 0.534", "支持（仅离线）"],
             ["memory/search 提升解决率", "p2final C−B=0；C 仅 3 次 search；sham 4/5 vs 4/5", "不支持"],
             ["repair 提升解决率", "只有单测/checks", "未验证"],
-            ["工具提升效果", "工具可用且兼容", "未做 ablation"],
+            ["工具提升效果", "四臂 8/8/9/9；retrieval 0 calls；gate 10 calls", "未验证/不支持"],
         ],
         widths=[5.6, 8.0, 3.2],
     )
@@ -375,6 +401,7 @@ def build():
             ["A/B/C 对照", "experiments/memory_abc_20261019/comparison_pilot_p2final.md"],
             ["5 题 localization", "experiments/localization_verified5/"],
             ["50 题 localization", "experiments/localization_verified50/"],
+            ["四臂工具 ablation", "experiments/ablation5v5_20261018/FOUR_ARM_20261019.md"],
             ["检索归因", "experiments/gate-20261017/retrieval_audit.md"],
             ["检索设计", "docs/retrieval.md"],
             ["服务/部署", "deployment/README.md"],
