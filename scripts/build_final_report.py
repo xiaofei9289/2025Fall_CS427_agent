@@ -334,6 +334,14 @@ def build():
         "按预注册规则，工具调用为 0 时停止同一 config 的第二轮；先修工具曝光，或把 gate 明确当作"
         "package treatment。当前不能声称工具提升了解决率。",
     )
+    body(
+        doc,
+        "随后把四个 config 的 step_limit 从 400 降到 250。四臂实际最大调用为 91，"
+        "250 不会 binding，因此既有 A/B/D 结果仍成立。给 retrieval 加“首次编辑前至少调用一次"
+        "检索工具”的提示后，3 题 smoke 为 2/3、1 次 code_context；10 题 recheck 为 9/10、"
+        "2 次 code_context、$0.0730。只有 2/10 题真正用了检索工具，解决数未变，treatment "
+        "仍基本未执行。",
+    )
 
     heading(doc, "5. 修复工作流与服务", 1)
     body(
@@ -372,7 +380,7 @@ def build():
             ["离线检索有信号", "50 题 context selection 0.691 vs 0.534", "支持（仅离线）"],
             ["memory/search 提升解决率", "p2final C−B=0；C 仅 3 次 search；sham 4/5 vs 4/5", "不支持"],
             ["repair 提升解决率", "只有单测/checks", "未验证"],
-            ["工具提升效果", "四臂 8/8/9/9；retrieval 0 calls；gate 10 calls", "未验证/不支持"],
+            ["工具提升效果", "四臂 8/8/9/9；250 recheck 9/10、2 calls", "未验证/不支持"],
         ],
         widths=[5.6, 8.0, 3.2],
     )

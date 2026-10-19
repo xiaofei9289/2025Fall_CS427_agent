@@ -31,6 +31,9 @@ This repository extends [mini-swe-agent](https://github.com/SWE-agent/mini-swe-a
   retrieval 9/10, gate 9/10. The plain retrieval arm made **0 retrieval tool
   calls**, so this is not a tool-effect result. See
   [four-arm report](experiments/ablation5v5_20261018/FOUR_ARM_20261019.md).
+- **250-step cap + retrieval prompt recheck**: the four-arm run peaked at 91 calls, so
+  250 does not bind; a stronger pre-edit prompt still produced only 2/10 retrieval-tool
+  calls and 9/10 resolved. The treatment is still mostly inactive; no tool-effect claim.
 - **Reproducibility**: 690 passed, 18 skipped, 52 deselected locally; desktop
   checks 419 passed, slow gate 9 passed.
 - **Final report**: [deliverables_final/report_20261019.pdf](deliverables_final/report_20261019.pdf).
