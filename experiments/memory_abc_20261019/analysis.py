@@ -488,6 +488,11 @@ def build_report(study: Path, arms: dict[str, str] | None = None, *, suffix: str
         and not missing
     )
     retrieval_used = metrics["c"].search_calls > 0 if "c" in metrics else False
+    no_search_tasks = (
+        sorted(task for task, row in rows["c"].items() if row.search_calls == 0)
+        if "c" in rows
+        else []
+    )
 
     report: dict[str, Any] = {
         "study": str(study),
@@ -496,6 +501,7 @@ def build_report(study: Path, arms: dict[str, str] | None = None, *, suffix: str
         "pilot_tasks": sorted(pilot),
         "valid": valid,
         "retrieval_used": retrieval_used,
+        "no_search_tasks": no_search_tasks,
         "arms": {arm: metrics[arm].as_dict() for arm in arms},
         "estimator": calibration,
         "contrasts": {contrast.name: contrast.as_dict() for contrast in contrasts},
@@ -558,6 +564,13 @@ def _render_markdown(
         lines += [
             "> **Attribution warning:** the C arm made **0** memory_search calls. C-B cannot be",
             "> attributed to history retrieval; treat it as a tool-description/prompt effect or noise.",
+            "",
+        ]
+    if report.get("no_search_tasks"):
+        lines += [
+            "> **C tasks without retrieval:** "
+            + ", ".join(report["no_search_tasks"])
+            + ". Their C-B contrast is not a retrieval test.",
             "",
         ]
     lines += [

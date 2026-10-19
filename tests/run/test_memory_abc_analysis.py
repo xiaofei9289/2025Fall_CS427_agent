@@ -176,7 +176,10 @@ def test_zero_search_calls_are_called_out_in_the_report(tmp_path):
     study = make_study(tmp_path / "study", outcomes, c_search=False)
     report = analysis.build_report(study)
     assert report["retrieval_used"] is False
-    assert "Attribution warning" in (study / "comparison.md").read_text()
+    assert report["no_search_tasks"] == TASKS
+    text = (study / "comparison.md").read_text()
+    assert "Attribution warning" in text
+    assert "C tasks without retrieval" in text
 
 
 def test_budget_violation_invalidates_the_report(tmp_path):
