@@ -46,6 +46,33 @@
 
 面向 Agent 应用工程岗位，下一步优先补两类证据：在相同第 45 步对话与工作区上分叉，验证收尾提示对最后五次调用的实际作用；再选择真实使用场景，留下用户反馈、完成率、延迟和成本记录。更大任务集应包含未参与调参的验证题，并增加重复运行。多租户和分布式执行应在实际部署需求出现后补充。
 
+## 2026-10-19 最终收敛结果
+
+A/B/C memory p2final 在 10 题 pilot 上完成 generation + official grading，`valid=True`：
+
+| Arm | Policy | Resolved | Cost | API calls | Search calls |
+| --- | --- | ---: | ---: | ---: | ---: |
+| A | window | **9/10** | $0.3046 | 1156 | 0 |
+| B | summary | 7/10 | $0.5413 | 538 | 0 |
+| C | summary_search | 7/10 | $0.6526 | 635 | **3** |
+
+C 只有 3 次 `memory_search`，7 题没有检索；C−B = 0，B−A / C−A 均为 −0.2。结论是：
+**这是一次有效 run，但不是检索的因果实验**。C 的 `memory_search` 指令、gate 和
+provider 兼容层共同改变了 treatment，且 gate 仍被 bash 编辑路径绕过。当前不能声称
+memory/search 提升 SWE-bench；A（window）在本轮最好。详见
+[PILOT_P2FINAL_20261019.md](../experiments/memory_abc_20261019/PILOT_P2FINAL_20261019.md)
+和 [comparison](../experiments/memory_abc_20261019/comparison_pilot_p2final.md)。
+
+离线 localization 50 题显示 context selection 的 Recall@5 0.691、Hit@5 0.76，
+高于文件级 BM25 的 0.534 / 0.60；5 题 `repo_brief` 的 0.88/1.00 是过拟合，50 题回落到
+0.645/0.68。检索在线收益仍未验证；gate 审计显示 5/5 找到官方文件、4/5 编辑、3/5 解决，
+瓶颈在检索后的收敛和验证。
+
+当前回归：本机 **688 passed, 18 skipped, 52 deselected**；台式机 checks **417 passed**，
+slow gate **9 passed**。新增 `tests/tools/test_retrieval_docker.py` 覆盖 `code_context` 和
+`find_references` 的容器路径（slow）。完整报告见
+[report_20261019.pdf](../deliverables_final/report_20261019.pdf)。
+
 ## 演示顺序
 
 1. 展示 API 提交的仓库、Issue、任务 ID 和状态变化。

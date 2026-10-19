@@ -81,10 +81,10 @@ python scripts/verify_v2_baseline.py
 - `experiments/configs/baseline.yaml`、`brief_only.yaml`、`retrieval.yaml`、`retrieval_gate.yaml` 是否能通过 SWE-bench 入口加载；
 - 默认离线测试是否通过。
 
-本机验证结果（2026-10-18，Python 3.11.12）：
+本机验证结果（2026-10-19，Python 3.11.12）：
 
 ```text
-674 passed, 19 skipped, 51 deselected
+688 passed, 18 skipped, 52 deselected
 ```
 
 服务测试中依赖 `os.killpg` 的用例对沙箱敏感；同一天较早一次运行曾在 DSH 文件沙箱下报

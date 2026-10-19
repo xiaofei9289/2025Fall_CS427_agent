@@ -15,6 +15,18 @@ This repository extends [mini-swe-agent](https://github.com/SWE-agent/mini-swe-a
 - `deliverables_midterm/`, `deliverables_final/`: SWE-bench run results and reports
 - `tests/`: tests for tools, memory, and the run flow
 
+## Latest results (2026-10-19)
+
+- **A/B/C memory p2final** (`valid=True`): A 9/10, B 7/10, C 7/10. C made only 3
+  `memory_search` calls; C−B = 0. This is a valid run but **not** evidence for a
+  retrieval effect. See [p2final report](experiments/memory_abc_20261019/PILOT_P2FINAL_20261019.md).
+- **Offline localization, 50 tasks**: context selection Recall@5 0.691 / Hit@5
+  0.76, file-level BM25 0.534 / 0.60. See
+  [50-case results](experiments/localization_verified50/result.json).
+- **Reproducibility**: 688 passed, 18 skipped, 52 deselected locally; desktop
+  checks 417 passed, slow gate 9 passed.
+- **Final report**: [deliverables_final/report_20261019.pdf](deliverables_final/report_20261019.pdf).
+
 ## Installation
 
 Python 3.10 or newer is required.
