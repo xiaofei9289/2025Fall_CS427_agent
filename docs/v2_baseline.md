@@ -84,7 +84,7 @@ python scripts/verify_v2_baseline.py
 本机验证结果（2026-10-19，Python 3.11.12）：
 
 ```text
-688 passed, 18 skipped, 52 deselected
+690 passed, 18 skipped, 52 deselected
 ```
 
 服务测试中依赖 `os.killpg` 的用例对沙箱敏感；同一天较早一次运行曾在 DSH 文件沙箱下报

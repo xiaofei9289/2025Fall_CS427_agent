@@ -253,11 +253,32 @@ def build():
     bullet(doc, "C 的指令、gate 和 provider 兼容层共同改变了 treatment，C−B 不能解释为“检索效应”。")
     bullet(doc, "gate 只拦 replace/write_file 和含 COMPLETE_TASK 的提交；bash 编辑路径仍可绕过。")
     bullet(doc, "历史 50 题 baseline 42/50、memory-on 40/50，成本约 7 倍；单轮方差 37/40/42，2 题差异不可解释。")
+
+    heading(doc, "3.1 Sham-search 控制（2026-10-19）", 2)
+    body(
+        doc,
+        "为把“有用检索”与“只是多了一个工具/提示/gate”分开，增加 C-sham 控制：同名、同 schema、"
+        "同描述、同 gate，但 memory_search 始终返回 No matching messages，retrieval_tokens=0。"
+        "C-real 与 C-sham 使用同一源码、5 题、同一预算和提示，只有返回内容不同。",
+    )
+    table(
+        doc,
+        ["C 变体", "Resolved", "Cost", "Calls", "Search calls"],
+        [
+            ["real", "4/5", "$0.1802", "185", "5"],
+            ["sham", "4/5", "$0.3599", "294", "8"],
+        ],
+        widths=[2.6, 2.6, 3.0, 2.8, 3.2],
+    )
+    bullet(doc, "两者解决同一组任务（11333、14855、15315、8721），都失败 11532；没有 real-only 或 sham-only。")
+    bullet(doc, "sham 更贵、检索更多，说明无内容时模型会重试/重读；这不是检索有效的证据。")
+    bullet(doc, "5 题没有统计功效；只能说明当前 C 在这组题上没有可见收益，不能证明检索普适无效。")
     body(
         doc,
         "因此当前结论是：memory 基础设施可运行、可审计，但没有证明性能收益；A（window）"
-        "在本轮最好。若继续研究，需要 sham-search 控制、覆盖 bash 写操作的 gate、"
-        "3 轮 × 10 题或 50 题两轮，而不是把 p2final 当作最终证据。",
+        "在本轮最好。sham 控制也没有显示检索收益。若继续研究，需要覆盖 bash 写操作的 gate、"
+        "按“证据确实被挤出”选任务、以及 10 题 × 2–3 轮的 C-real/C-sham 对照；"
+        "当前不应继续 50 题 memory 实验。",
     )
 
     heading(doc, "4. 代码检索", 1)
@@ -305,7 +326,7 @@ def build():
     )
 
     heading(doc, "6. 可复现性与测试", 1)
-    bullet(doc, "本机：688 passed, 18 skipped, 52 deselected；Ruff 通过。")
+    bullet(doc, "本机：690 passed, 18 skipped, 52 deselected；Ruff 通过。")
     bullet(doc, "台式机：checks 417 passed, 10 deselected；slow gate 9 passed。")
     bullet(doc, "所有 SWE-bench run 记录 source fingerprint、题目列表、配置和官方评分；实验目录保留历史结果。")
     bullet(doc, "新增 tests/tools/test_retrieval_docker.py，覆盖 code_context / find_references 的容器路径（slow）。")
@@ -323,7 +344,7 @@ def build():
         [
             ["平台可复现", "freeze/manifest/audit/官方评分/688 测试", "支持"],
             ["离线检索有信号", "50 题 context selection 0.691 vs 0.534", "支持（仅离线）"],
-            ["memory/search 提升解决率", "p2final C−B=0；C 仅 3 次 search", "不支持"],
+            ["memory/search 提升解决率", "p2final C−B=0；C 仅 3 次 search；sham 4/5 vs 4/5", "不支持"],
             ["repair 提升解决率", "只有单测/checks", "未验证"],
             ["工具提升效果", "工具可用且兼容", "未做 ablation"],
         ],
@@ -338,7 +359,7 @@ def build():
 
     heading(doc, "8. 下一步", 1)
     bullet(doc, "P0：最终报告与交付物纳入 p2final 负结果；不再声称 memory/search 提升。")
-    bullet(doc, "P0：memory 二选一——写负结果收尾，或用 sham-search + 覆盖 bash 的 gate 重做 3 轮。")
+    bullet(doc, "P0：memory 以负结果收尾；sham 5 题无收益，不再跑 50 题 memory 对照。")
     bullet(doc, "P1：工具组 ablation（10 题 × 2 轮）；没有增益的工具只保留工程价值。")
     bullet(doc, "P1：retrieval 四臂在线 gate（baseline / brief_only / retrieval / retrieval_gate），重点看检索后编辑/验证。")
     bullet(doc, "P1：repair workflow off/on 5–10 题，测 empty patch、verified patch、resolved。")
@@ -350,6 +371,7 @@ def build():
         ["产物", "位置"],
         [
             ["p2final 报告", "experiments/memory_abc_20261019/PILOT_P2FINAL_20261019.md"],
+            ["sham 控制", "experiments/memory_abc_20261019/SHAM_20261019.md"],
             ["A/B/C 对照", "experiments/memory_abc_20261019/comparison_pilot_p2final.md"],
             ["5 题 localization", "experiments/localization_verified5/"],
             ["50 题 localization", "experiments/localization_verified50/"],

@@ -63,12 +63,19 @@ memory/search 提升 SWE-bench；A（window）在本轮最好。详见
 [PILOT_P2FINAL_20261019.md](../experiments/memory_abc_20261019/PILOT_P2FINAL_20261019.md)
 和 [comparison](../experiments/memory_abc_20261019/comparison_pilot_p2final.md)。
 
+Sham-search 控制（5 题，同源码/提示/gate，只有返回内容不同）：C-real 4/5、C-sham 4/5，
+同一组 11333/14855/15315/8721 通过，11532 都失败；real 成本 $0.1802，sham $0.3599。
+没有 real-only 或 sham-only，说明当前 C 在这组题上没有检索收益，但 5 题没有统计功效。
+详见 [SHAM_20261019.md](../experiments/memory_abc_20261019/SHAM_20261019.md)。结论是
+memory 以负结果收尾，不再跑 50 题 memory 对照；若继续，需要按“证据确实被挤出”选任务并做
+10 题 × 2–3 轮 C-real/C-sham。
+
 离线 localization 50 题显示 context selection 的 Recall@5 0.691、Hit@5 0.76，
 高于文件级 BM25 的 0.534 / 0.60；5 题 `repo_brief` 的 0.88/1.00 是过拟合，50 题回落到
 0.645/0.68。检索在线收益仍未验证；gate 审计显示 5/5 找到官方文件、4/5 编辑、3/5 解决，
 瓶颈在检索后的收敛和验证。
 
-当前回归：本机 **688 passed, 18 skipped, 52 deselected**；台式机 checks **417 passed**，
+当前回归：本机 **690 passed, 18 skipped, 52 deselected**；台式机 checks **417 passed**，
 slow gate **9 passed**。新增 `tests/tools/test_retrieval_docker.py` 覆盖 `code_context` 和
 `find_references` 的容器路径（slow）。完整报告见
 [report_20261019.pdf](../deliverables_final/report_20261019.pdf)。
