@@ -1,5 +1,6 @@
 """Run the four-arm retrieval/tool ablation (one round) inside the Linux container."""
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -14,7 +15,15 @@ ARMS = {
 
 
 def main() -> None:
-    for tag, config in ARMS.items():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--arm", choices=("all", *ARMS), default="all")
+    parser.add_argument("--tasks", default="tasks10.json")
+    parser.add_argument("--suffix", default="")
+    parser.add_argument("--workers", type=int, default=2)
+    args = parser.parse_args()
+    selected = list(ARMS) if args.arm == "all" else [args.arm]
+    for arm in selected:
+        tag = arm + args.suffix
         if (STUDY / tag / "evaluation" / "grading_summary.json").is_file():
             print(f"=== SKIP {tag} (already graded) ===", flush=True)
             continue
@@ -25,13 +34,13 @@ def main() -> None:
                 str(STUDY / "run.py"),
                 phase,
                 "--config",
-                config,
+                ARMS[arm],
                 "--tag",
                 tag,
                 "--tasks",
-                "tasks10.json",
+                args.tasks,
                 "--workers",
-                "2",
+                str(args.workers),
             ]
             result = subprocess.run(command, cwd=STUDY)
             if result.returncode:

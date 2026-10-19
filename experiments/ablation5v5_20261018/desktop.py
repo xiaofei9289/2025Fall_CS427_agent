@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 import platform
@@ -36,6 +37,12 @@ def api_key() -> str:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--arm", default="all")
+    parser.add_argument("--tasks", default="tasks10.json")
+    parser.add_argument("--suffix", default="")
+    parser.add_argument("--workers", type=int, default=2)
+    args = parser.parse_args()
     if platform.system() != "Windows":
         raise SystemExit("Run this launcher on the Windows desktop.")
     study = Path(__file__).resolve().parent
@@ -116,6 +123,14 @@ def main() -> None:
         "cs427-validation:local",
         "python",
         f"experiments/{STUDY_NAME}/run_four.py",
+        "--arm",
+        args.arm,
+        "--tasks",
+        args.tasks,
+        "--suffix",
+        args.suffix,
+        "--workers",
+        str(args.workers),
     ]
     print("Running four-arm ablation in the desktop Linux engine", flush=True)
     subprocess.run(command, cwd=root, env=env, check=True)
