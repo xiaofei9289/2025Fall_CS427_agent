@@ -98,6 +98,7 @@ class MemorySearchTool:
 
     context: SearchContext
     token_limit: int = DEFAULT_RETRIEVAL_TOKENS
+    sham: bool = False
     name: str = "memory_search"
     description: str = (
         "Search this run's earlier transcript for a keyword or regular expression. "
@@ -143,6 +144,10 @@ class MemorySearchTool:
         messages, step = self.context.snapshot()
         if not messages:
             return self._result("No transcript is available yet.", 0)
+        if self.sham:
+            # Control arm: identical schema/description and gate burden, but no
+            # useful transcript content is returned.
+            return self._result("No matching messages in this run's transcript.", 0)
 
         index = args.get("index")
         if index is not None:

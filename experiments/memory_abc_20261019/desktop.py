@@ -58,6 +58,7 @@ def main() -> None:
     parser.add_argument("--c-tag", default=None)
     parser.add_argument("--tasks", default=None, help="task-list JSON for a focused rerun")
     parser.add_argument("--redo", action="store_true", help="overwrite an existing tag")
+    parser.add_argument("--sham-search", action="store_true", help="C control: install memory_search but return no matches")
     args = parser.parse_args()
     if platform.system() != "Windows":
         raise SystemExit("Run this launcher on the Windows desktop.")
@@ -110,6 +111,7 @@ def main() -> None:
         "MSWEA_SILENT_STARTUP": "1",
         "MSWEA_GLOBAL_CONFIG_DIR": "/tmp/cs427-config",
         "HF_HOME": "/hf-cache",
+        "MSWEA_MEMORY_SHAM": "1" if args.sham_search else "0",
     }
     mounts = [
         "--mount",
@@ -145,6 +147,8 @@ def main() -> None:
         "DEEPSEEK_API_KEY",
         "-e",
         "HF_HOME",
+        "-e",
+        "MSWEA_MEMORY_SHAM",
         "cs427-validation:local",
         "python",
         f"experiments/{STUDY_NAME}/run.py",

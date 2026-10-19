@@ -26,6 +26,15 @@
 
 配置文件在 `configs/base.yaml` + `configs/{a,b,c}.yaml`。每个 arm 文件**只能**设置 `agent.memory_policy`，`study_config.py` 会拒绝任何其他覆盖。`memory_search` 不在 `enabled_tools` 里，由 C 的 policy 安装；C 的 policy 还会在 system prompt 末尾追加一段“何时调用 memory_search”的说明，并在第一次写文件或提交前要求至少一次检索。这两项都是 C treatment 的一部分，A/B 不包含；用 `MSWEA_MEMORY_SEARCH_GATE=0` 可关闭 gate，做自然 C 的敏感性检查。
 
+### 2.1 Sham-search 控制
+
+为了把“检索到有用内容”与“只是多了一个工具/提示/gate”分开，C 支持一个控制臂：
+`MSWEA_MEMORY_SHAM=1` 时仍安装同名、同 schema、同描述的 `memory_search`，gate 也照常计数，但工具始终返回
+`No matching messages in this run's transcript.`，`retrieval_tokens=0`。C-real 与 C-sham 使用同一
+源码、任务、预算、提示和 gate，只有返回内容不同；两者的解决率差异才接近“有用检索”的效应。
+运行标签必须分开，例如 `sham_real` 与 `sham_ctl`，不能混在同一 tag 中。该控制不改变 A/B/C
+的 p2final 结论；它需要单独一轮实验。
+
 ## 3. 固定条件
 
 - 模型：`deepseek/deepseek-chat`，temperature 0。

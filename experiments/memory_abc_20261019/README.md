@@ -35,6 +35,12 @@ python experiments/memory_abc_20261019/desktop.py all --arm all --pilot --worker
 python experiments/memory_abc_20261019/desktop.py generation --arm c --pilot \
   --round p2g --tasks experiments/memory_abc_20261019/tasks_retry_p2f.json --workers 1
 
+# sham-search control: same tool/prompt/gate, no useful transcript content
+python experiments/memory_abc_20261019/desktop.py all --arm c --pilot \
+  --round sham_ctl --sham-search --tasks experiments/memory_abc_20261019/tasks_sham5.json --workers 2
+python experiments/memory_abc_20261019/desktop.py all --arm c --pilot \
+  --round sham_real --tasks experiments/memory_abc_20261019/tasks_sham5.json --workers 2
+
 # formal: 50 tasks, one round at a time
 python experiments/memory_abc_20261019/desktop.py all --arm all --round r1 --workers 2
 python experiments/memory_abc_20261019/desktop.py all --arm all --round r2 --workers 2

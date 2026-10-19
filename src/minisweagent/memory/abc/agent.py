@@ -127,10 +127,12 @@ class MemoryAgent(DefaultAgent):
         # A/B must not expose the tool even if a global registry happens to
         # contain the legacy one.  C installs the clean tool bound to this run.
         self.tools.pop("memory_search", None)
+        self.search_sham = os.environ.get("MSWEA_MEMORY_SHAM", "0") == "1"
         if self.config.memory_policy == "summary_search":
             self.tools["memory_search"] = MemorySearchTool(
                 self.search_context,
                 token_limit=self.config.memory_retrieval_tokens,
+                sham=self.search_sham,
             )
         self.retrieval_gate = set()
         self.search_calls = 0

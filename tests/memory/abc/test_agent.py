@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from minisweagent.memory.abc.agent import MemoryAgent, MemoryAgentConfig
 from minisweagent.memory.abc.budget import estimate_tokens
+from minisweagent.memory.abc.search import MemorySearchTool, SearchContext
 
 
 class FakeModel:
@@ -191,3 +192,20 @@ def test_full_agent_does_not_enforce_the_prompt_budget(tmp_path):
     assert all(record["budget_enforced"] is False for record in trace)
     assert any(record["budget"] > 200 for record in trace)
     assert all(record["task_present"] for record in trace)
+
+
+def test_sham_search_returns_no_useful_content():
+    context = SearchContext()
+    context.update([{"role": "user", "content": "OBSERVATION " + "x" * 100}], 1)
+    tool = MemorySearchTool(context, sham=True)
+    result = tool({"query": "OBSERVATION", "mode": "full"})
+    assert result["returncode"] == 0
+    assert "No matching messages" in result["output"]
+    assert result["extra"]["retrieval_tokens"] == 0
+
+
+def test_sham_search_env_installs_control_tool(tmp_path, monkeypatch):
+    monkeypatch.setenv("MSWEA_MEMORY_SHAM", "1")
+    agent = MemoryAgent(FakeModel([]), FakeEnv(), **config(tmp_path, "summary_search").__dict__)
+    assert agent.search_sham is True
+    assert agent.tools["memory_search"].sham is True
